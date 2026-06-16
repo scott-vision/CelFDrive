@@ -19,6 +19,7 @@ dependencies:
   - pillow
   - seaborn
   - tqdm
+  - pyyaml
   - pip:
       - dill==0.3.8
       - opencv-contrib-python

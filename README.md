@@ -40,6 +40,10 @@ If you have another model you can replace Ultralytics with a pytorch model,
 but you may need to modify the coordinate calculations as the current version
 is based on normalised xywh coordinates where xy is the centre of the object.
 
+## Defining a Workflow
+
+
+
 ## Training Data
 
 CellClicker and CellSelector can be used to generate YOLO compatible labels from time series data.

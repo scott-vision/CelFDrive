@@ -1,0 +1,137 @@
+schema_version: 1
+
+project:
+  repo_path: "C:/path/to/CelFDrive"
+
+model:
+  weights_path: "${project.repo_path}/models/SiRDNA/20240514_Polled_0.0_4/weights/best.pt"
+  backend: "ultralytics_yolo"
+  default_inference_confidence: 0.01
+  suppress_stdout: true
+
+logging:
+  root_dir: "${project.repo_path}/Logging"
+  use_date_subfolder: true
+  date_format: "%Y-%m-%d"
+
+  experiment_folder:
+    prefix: "exp"
+    digits: 3
+
+  output_image:
+    prefix: "tmpimg"
+    digits: 3
+    extension: ".png"
+
+preprocessing:
+  input_channel:
+    mode: "first_channel_if_rgb"
+  top_clip_percentile: 0.01
+  normalize_min_max: true
+  output_dtype: "uint8"
+  output_range: [0, 255]
+  repeat_grayscale_to_rgb: true
+
+tiling:
+  enabled: true
+  tile_size_px: 640
+  edge_mode: "shift_last_tile_inside_image"
+  overlap_px: 0
+
+plotting:
+  enabled: true
+  cmap: "gray"
+  bbox:
+    edge_color: "red"
+    line_width: 1
+  label:
+    font_size: 8
+    text_color: "white"
+    background_color: "black"
+    background_alpha: 0.5
+
+coordinate_conversion:
+  default_z_offset_um: 0
+  merge_tolerance_um: 20
+
+  stage_direction:
+    x: 1
+    y: 1
+    z: 1
+
+  llsm:
+    invert_y_stage_direction: true
+
+no_detection:
+  n_returned_locations: 1
+  script: "donothing"
+  name: "nothing"
+  comment: "nothing"
+  return_original_first_position: true
+
+profiles:
+  sdc:
+    description: "Spinning disk / non-LLSM high-resolution capture profile"
+    llsm: false
+    highres_script: "floifmHighres"
+    highres_comment: "Highres"
+    name_template: "{class_name} Highres x {x}, Y {y}, Z {z}"
+
+    classes:
+      0:
+        name: "prophase"
+        confidence_threshold: 0.01
+        priority_rank: 1
+      1:
+        name: "earlyprometaphase"
+        confidence_threshold: 0.01
+        priority_rank: 0
+      2:
+        name: "prometaphase"
+        confidence_threshold: 0.01
+        priority_rank: 2
+      3:
+        name: "metaphase"
+        confidence_threshold: 0.01
+        priority_rank: 3
+      4:
+        name: "anaphase"
+        confidence_threshold: 0.01
+        priority_rank: 4
+      5:
+        name: "telophase"
+        confidence_threshold: 0.05
+        priority_rank: 5
+
+  llsm:
+    description: "Lattice light-sheet capture profile"
+    llsm: true
+    highres_script: "find-loc-out"
+    highres_comment: "Highres"
+    name_template: "{class_name} Highres x {x}, Y {y}, Z {z}"
+
+    classes:
+      0:
+        name: "prophase"
+        confidence_threshold: 0.1
+        priority_rank: 1
+      1:
+        name: "earlyprometaphase"
+        confidence_threshold: 0.2
+        priority_rank: 0
+      2:
+        name: "prometaphase"
+        confidence_threshold: 1.0
+        priority_rank: 2
+      3:
+        name: "metaphase"
+        confidence_threshold: 1.0
+        priority_rank: 3
+      4:
+        name: "anaphase"
+        confidence_threshold: 1.0
+        priority_rank: 4
+      5:
+        name: "telophase"
+        confidence_threshold: 1.0
+        priority_rank: 5
