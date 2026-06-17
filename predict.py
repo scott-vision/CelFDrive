@@ -92,6 +92,12 @@ def get_class_info(profile_config):
     }
 
 
+def get_inference_confidence(class_info):
+    # YOLO applies this threshold before class-specific filtering, so it must be
+    # the lowest class confidence threshold to keep all later-filterable detections.
+    return min(class_config[1] for class_config in class_info.values())
+
+
 def get_logging_directory():
     cfg = get_config()
     logging_cfg = cfg["logging"]
@@ -301,10 +307,10 @@ def adjust_coordinates(detections, x_offset, y_offset):
 
 def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=False):
     cfg = get_config()
-    if conf is None:
-        conf = cfg["model"].get("default_inference_confidence", 0.01)
     if class_info is None:
         class_info = get_class_info(cfg["profiles"]["sdc"])
+    if conf is None:
+        conf = get_inference_confidence(class_info)
 
     processed_img = preprocess_image(raw_img)
     split_images = split_image(processed_img)
@@ -357,7 +363,7 @@ def process_single_location(x, y, z, image, xy_pixel_spacing, z_spacing, x_stage
     class_names = {key: value[0] for key, value in class_info.items()}
     results = process_image(
         image,
-        get_config()["model"].get("default_inference_confidence", 0.01),
+        None,
         img_path,
         class_info,
         plot=plot_enabled,
