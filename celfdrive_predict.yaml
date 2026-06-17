@@ -6,6 +6,7 @@ model:
   backend: ultralytics_yolo
   suppress_stdout: true
 logging:
+  enabled: true
   root_dir: ${project.repo_path}/Logging
   use_date_subfolder: true
   date_format: '%Y-%m-%d'
@@ -21,11 +22,6 @@ preprocessing:
     mode: first_channel_if_rgb
   top_clip_percentile: 0.01
   normalize_min_max: true
-  output_dtype: uint8
-  output_range:
-  - 0.0
-  - 255.0
-  repeat_grayscale_to_rgb: true
 tiling:
   enabled: true
   tile_size_px: 640

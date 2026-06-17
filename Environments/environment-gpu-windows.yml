@@ -29,5 +29,6 @@ dependencies:
       - fsspec==2024.2.0
       - openpyxl
       - ultralytics
+      - rfdetr
       - jupyter
 prefix: E:\anaconda3\envs\CellToolsGPU

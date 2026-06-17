@@ -30,5 +30,6 @@ dependencies:
       - torchvision
       - torchaudio
       - ultralytics
+      - rfdetr
       - jupyter
 prefix: C:\Users\u1604360\anaconda3\envs\CellToolsGPU

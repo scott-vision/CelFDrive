@@ -205,11 +205,13 @@ class ConfigEditor:
         preprocessing = self.add_tab(self.main_notebook, "Image")
         coordinates = self.add_tab(self.main_notebook, "Coordinates")
         profiles = self.add_tab(self.main_notebook, "Profiles")
+        advanced = self.add_tab(self.main_notebook, "Advanced")
 
         self.build_general_tab(general)
         self.build_image_tab(preprocessing)
         self.build_coordinates_tab(coordinates)
         self.build_profiles_tab(profiles)
+        self.build_advanced_tab(advanced)
 
         action_bar = ttk.Frame(self.root)
         action_bar.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -326,26 +328,23 @@ class ConfigEditor:
             command = lambda: self.browse_path(var, browse)
             ttk.Button(parent, text="Browse", command=command).grid(row=row, column=2, padx=(8, 0), pady=4)
 
-    def add_output_range_fields(self, parent, row):
-        """Add paired min/max inputs for preprocessing.output_range.
+    def add_dropdown(self, parent, row, label, path, options):
+        """Add a labelled dropdown bound to a config path.
 
         Args:
             parent (tk.Widget): Parent container.
             row (int): Grid row in the parent.
+            label (str): Human-readable field label.
+            path (list[str | int]): Config path for the value.
+            options (list[str]): Allowed string values.
 
         Returns:
             None
         """
-        output_range = self.get_value(["preprocessing", "output_range"])
-        self.vars[("preprocessing", "output_range", 0)] = (tk.StringVar(value=str(output_range[0])), float)
-        self.vars[("preprocessing", "output_range", 1)] = (tk.StringVar(value=str(output_range[1])), float)
-
-        ttk.Label(parent, text="Output range").grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
-        range_frame = ttk.Frame(parent)
-        range_frame.grid(row=row, column=1, sticky="w", pady=4)
-        ttk.Entry(range_frame, width=10, textvariable=self.vars[("preprocessing", "output_range", 0)][0]).grid(row=0, column=0)
-        ttk.Label(range_frame, text="to").grid(row=0, column=1, padx=6)
-        ttk.Entry(range_frame, width=10, textvariable=self.vars[("preprocessing", "output_range", 1)][0]).grid(row=0, column=2)
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+        var = self.make_var(path, str)
+        widget = ttk.Combobox(parent, textvariable=var, values=options, state="readonly")
+        widget.grid(row=row, column=1, sticky="ew", pady=4)
 
     def browse_path(self, var, browse):
         """Open a file or directory picker and write the selected path to a variable.
@@ -479,18 +478,14 @@ class ConfigEditor:
         project = self.add_section(parent, "Project And Model", 0)
         self.add_field(project, 0, "Repo path", ["project", "repo_path"], browse="dir")
         self.add_field(project, 1, "Weights path", ["model", "weights_path"], browse="file")
-        self.add_field(project, 2, "Backend", ["model", "backend"])
+        self.add_dropdown(project, 2, "Backend", ["model", "backend"], ["ultralytics_yolo", "rfdetr", "torchscript"])
         self.add_field(project, 3, "Suppress model stdout", ["model", "suppress_stdout"], bool)
 
         logging = self.add_section(parent, "Logging", 1)
-        self.add_field(logging, 0, "Root directory", ["logging", "root_dir"], browse="dir")
-        self.add_field(logging, 1, "Use date subfolder", ["logging", "use_date_subfolder"], bool)
-        self.add_field(logging, 2, "Date format", ["logging", "date_format"])
-        self.add_field(logging, 3, "Experiment prefix", ["logging", "experiment_folder", "prefix"])
-        self.add_field(logging, 4, "Experiment digits", ["logging", "experiment_folder", "digits"], int)
-        self.add_field(logging, 5, "Output image prefix", ["logging", "output_image", "prefix"])
-        self.add_field(logging, 6, "Output image digits", ["logging", "output_image", "digits"], int)
-        self.add_field(logging, 7, "Output image extension", ["logging", "output_image", "extension"])
+        self.add_field(logging, 0, "Enabled", ["logging", "enabled"], bool)
+
+        plotting = self.add_section(parent, "Plotting", 2)
+        self.add_field(plotting, 0, "Enabled", ["plotting", "enabled"], bool)
 
     def build_image_tab(self, parent):
         """Build controls for preprocessing, tiling, and plotting config.
@@ -505,9 +500,6 @@ class ConfigEditor:
         self.add_field(preprocessing, 0, "Input channel mode", ["preprocessing", "input_channel", "mode"])
         self.add_field(preprocessing, 1, "Top clip percentile", ["preprocessing", "top_clip_percentile"], float)
         self.add_field(preprocessing, 2, "Normalize min/max", ["preprocessing", "normalize_min_max"], bool)
-        self.add_field(preprocessing, 3, "Output dtype", ["preprocessing", "output_dtype"])
-        self.add_output_range_fields(preprocessing, 4)
-        self.add_field(preprocessing, 5, "Repeat grayscale to RGB", ["preprocessing", "repeat_grayscale_to_rgb"], bool)
 
         tiling = self.add_section(parent, "Tiling", 1)
         self.add_field(tiling, 0, "Enabled", ["tiling", "enabled"], bool)
@@ -515,15 +507,33 @@ class ConfigEditor:
         self.add_field(tiling, 2, "Edge mode", ["tiling", "edge_mode"])
         self.add_field(tiling, 3, "Overlap px", ["tiling", "overlap_px"], int)
 
-        plotting = self.add_section(parent, "Plotting", 2)
-        self.add_field(plotting, 0, "Enabled", ["plotting", "enabled"], bool)
-        self.add_field(plotting, 1, "Color map", ["plotting", "cmap"])
-        self.add_field(plotting, 2, "Box edge color", ["plotting", "bbox", "edge_color"])
-        self.add_field(plotting, 3, "Box line width", ["plotting", "bbox", "line_width"], float)
-        self.add_field(plotting, 4, "Label font size", ["plotting", "label", "font_size"], int)
-        self.add_field(plotting, 5, "Label text color", ["plotting", "label", "text_color"])
-        self.add_field(plotting, 6, "Label background color", ["plotting", "label", "background_color"])
-        self.add_field(plotting, 7, "Label background alpha", ["plotting", "label", "background_alpha"], float)
+    def build_advanced_tab(self, parent):
+        """Build advanced logging and plotting detail controls.
+
+        Args:
+            parent (tk.Widget): Tab content frame.
+
+        Returns:
+            None
+        """
+        logging = self.add_section(parent, "Logging Details", 0)
+        self.add_field(logging, 0, "Root directory", ["logging", "root_dir"], browse="dir")
+        self.add_field(logging, 1, "Use date subfolder", ["logging", "use_date_subfolder"], bool)
+        self.add_field(logging, 2, "Date format", ["logging", "date_format"])
+        self.add_field(logging, 3, "Experiment prefix", ["logging", "experiment_folder", "prefix"])
+        self.add_field(logging, 4, "Experiment digits", ["logging", "experiment_folder", "digits"], int)
+        self.add_field(logging, 5, "Output image prefix", ["logging", "output_image", "prefix"])
+        self.add_field(logging, 6, "Output image digits", ["logging", "output_image", "digits"], int)
+        self.add_field(logging, 7, "Output image extension", ["logging", "output_image", "extension"])
+
+        plotting = self.add_section(parent, "Plotting Details", 1)
+        self.add_field(plotting, 0, "Color map", ["plotting", "cmap"])
+        self.add_field(plotting, 1, "Box edge color", ["plotting", "bbox", "edge_color"])
+        self.add_field(plotting, 2, "Box line width", ["plotting", "bbox", "line_width"], float)
+        self.add_field(plotting, 3, "Label font size", ["plotting", "label", "font_size"], int)
+        self.add_field(plotting, 4, "Label text color", ["plotting", "label", "text_color"])
+        self.add_field(plotting, 5, "Label background color", ["plotting", "label", "background_color"])
+        self.add_field(plotting, 6, "Label background alpha", ["plotting", "label", "background_alpha"], float)
 
     def build_coordinates_tab(self, parent):
         """Build controls for coordinate conversion and no-detection config.
@@ -630,13 +640,7 @@ class ConfigEditor:
             ValueError: If a form value cannot be converted to its expected type.
         """
         for path, (var, value_type) in self.vars.items():
-            if path[:2] == ("preprocessing", "output_range"):
-                continue
             self.set_value(list(path), self.parse_var(var, value_type, path))
-
-        output_min = self.parse_var(*self.vars[("preprocessing", "output_range", 0)], ("preprocessing", "output_range", 0))
-        output_max = self.parse_var(*self.vars[("preprocessing", "output_range", 1)], ("preprocessing", "output_range", 1))
-        self.config["preprocessing"]["output_range"] = [output_min, output_max]
 
     def rebuild_ui(self, selected_main_tab=None, selected_profile=None):
         """Recreate the full form from the current in-memory config.

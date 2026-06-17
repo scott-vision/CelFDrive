@@ -65,14 +65,46 @@ def get_model():
         return model
 
     cfg = get_config()
-    backend = cfg["model"].get("backend", "ultralytics_yolo")
-    if backend != "ultralytics_yolo":
+    backend = normalize_backend(cfg["model"].get("backend", "ultralytics_yolo"))
+    weights_path = cfg["model"]["weights_path"]
+
+    if backend == "ultralytics_yolo":
+        from ultralytics import YOLO
+
+        model = YOLO(weights_path)
+    elif backend == "rfdetr":
+        from rfdetr import RFDETRBase
+
+        try:
+            model = RFDETRBase(pretrain_weights=weights_path)
+        except TypeError:
+            model = RFDETRBase()
+            if hasattr(model, "load"):
+                model.load(weights_path)
+            else:
+                raise TypeError("RFDETRBase does not support loading weights with this adapter")
+    elif backend == "torchscript":
+        import torch
+
+        model = torch.jit.load(weights_path, map_location="cpu")
+        model.eval()
+    else:
         raise ValueError(f"Unsupported model backend: {backend}")
 
-    from ultralytics import YOLO
-
-    model = YOLO(cfg["model"]["weights_path"])
     return model
+
+
+def normalize_backend(backend):
+    backend_key = str(backend).strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "ultrayltics_yolo": "ultralytics_yolo",
+        "ultralytics_yolo": "ultralytics_yolo",
+        "rfdetr": "rfdetr",
+        "rf_detr": "rfdetr",
+        "torchscript": "torchscript",
+        "torch_script": "torchscript",
+    }
+    return aliases.get(backend_key, backend_key)
 
 
 def get_profile_config(LLSM):
@@ -96,6 +128,10 @@ def get_inference_confidence(class_info):
     # YOLO applies this threshold before class-specific filtering, so it must be
     # the lowest class confidence threshold to keep all later-filterable detections.
     return min(class_config[1] for class_config in class_info.values())
+
+
+def is_logging_enabled():
+    return get_config()["logging"].get("enabled", True)
 
 
 def get_logging_directory():
@@ -259,11 +295,7 @@ def preprocess_image(img):
                 timepoint_data_normalized - timepoint_data_normalized.min()
             ) / value_range
 
-    output_min, output_max = preprocessing_cfg.get("output_range", [0, 255])
-    img = timepoint_data_normalized * (output_max - output_min) + output_min
-
-    if preprocessing_cfg.get("output_dtype", "uint8") == "uint8":
-        img = img.astype(np.uint8)
+    img = (timepoint_data_normalized * 255).astype(np.uint8)
 
     return img
 
@@ -305,6 +337,94 @@ def adjust_coordinates(detections, x_offset, y_offset):
     return detections_adjusted
 
 
+def run_model_inference(img, conf):
+    cfg = get_config()
+    backend = normalize_backend(cfg["model"].get("backend", "ultralytics_yolo"))
+    current_model = get_model()
+
+    if backend == "ultralytics_yolo":
+        results = current_model(img, conf=conf)
+        return ultralytics_results_to_detections(results, 0, 0)
+    if backend == "rfdetr":
+        results = current_model.predict(img, threshold=conf)
+        return rfdetr_results_to_detections(results)
+    if backend == "torchscript":
+        return torchscript_results_to_detections(current_model, img, conf)
+    raise ValueError(f"Unsupported model backend: {backend}")
+
+
+def ultralytics_results_to_detections(results, x_offset, y_offset):
+    if len(results[0].boxes.xyxy) == 0:
+        return []
+    return adjust_coordinates(results[0].boxes, x_offset, y_offset)
+
+
+def rfdetr_results_to_detections(results):
+    xyxy = getattr(results, "xyxy", None)
+    confidence = getattr(results, "confidence", None)
+    class_id = getattr(results, "class_id", None)
+
+    if xyxy is None and isinstance(results, dict):
+        xyxy = results.get("xyxy")
+        if xyxy is None:
+            xyxy = results.get("boxes")
+        confidence = results.get("confidence")
+        if confidence is None:
+            confidence = results.get("scores")
+        class_id = results.get("class_id")
+        if class_id is None:
+            class_id = results.get("labels")
+
+    if xyxy is None:
+        raise ValueError("RF-DETR results must provide xyxy/boxes, confidence/scores, and class_id/labels")
+
+    return xyxy_arrays_to_detections(xyxy, confidence, class_id)
+
+
+def torchscript_results_to_detections(current_model, img, conf):
+    import torch
+
+    input_tensor = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+    with torch.no_grad():
+        outputs = current_model(input_tensor)
+
+    if isinstance(outputs, (list, tuple)):
+        outputs = outputs[0]
+
+    if isinstance(outputs, dict):
+        return xyxy_arrays_to_detections(outputs["boxes"], outputs["scores"], outputs["labels"], conf)
+
+    output_array = outputs.detach().cpu().numpy()
+    if output_array.ndim == 3:
+        output_array = output_array[0]
+    if output_array.shape[1] < 6:
+        raise ValueError("TorchScript tensor output must be Nx6: x1,y1,x2,y2,confidence,class_id")
+
+    return [
+        xyxy_to_detection(row[:4], row[4], row[5])
+        for row in output_array
+        if row[4] >= conf
+    ]
+
+
+def xyxy_arrays_to_detections(xyxy, confidence, class_id, conf_threshold=None):
+    xyxy = np.asarray(xyxy)
+    confidence = np.asarray(confidence)
+    class_id = np.asarray(class_id)
+
+    detections = []
+    for box, score, cls in zip(xyxy, confidence, class_id):
+        if conf_threshold is not None and score < conf_threshold:
+            continue
+        detections.append(xyxy_to_detection(box, score, cls))
+    return detections
+
+
+def xyxy_to_detection(box, score, cls):
+    x1, y1, x2, y2 = [float(value) for value in box]
+    return [int(cls), x1, y1, x2 - x1, y2 - y1, float(score)]
+
+
 def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=False):
     cfg = get_config()
     if class_info is None:
@@ -317,19 +437,19 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
     results = []
 
     for img, x_offset, y_offset in split_images:
-        if cfg["preprocessing"].get("repeat_grayscale_to_rgb", True):
-            img = np.repeat(img[:, :, np.newaxis], 3, axis=2)
+        img = np.repeat(img[:, :, np.newaxis], 3, axis=2)
 
         if cfg["model"].get("suppress_stdout", True):
             with open(os.devnull, 'w') as nullfile:
                 with contextlib.redirect_stdout(nullfile):
-                    results_split = get_model()(img, conf=conf)
+                    results_split = run_model_inference(img, conf)
         else:
-            results_split = get_model()(img, conf=conf)
+            results_split = run_model_inference(img, conf)
 
-        if len(results_split[0].boxes.xyxy) != 0:
-            results_adjusted = adjust_coordinates(results_split[0].boxes, x_offset, y_offset)
-            results.extend(results_adjusted)
+        for detection in results_split:
+            detection[1] += x_offset
+            detection[2] += y_offset
+        results.extend(results_split)
 
     if plot:
         if save_path is None:
@@ -357,7 +477,7 @@ def process_single_location(x, y, z, image, xy_pixel_spacing, z_spacing, x_stage
         image = np.max(image, axis=0)
 
     height, width = image.shape
-    plot_enabled = get_config()["plotting"].get("enabled", True)
+    plot_enabled = get_config()["plotting"].get("enabled", True) and is_logging_enabled()
     img_path = get_outimg_path() if plot_enabled else None
 
     class_names = {key: value[0] for key, value in class_info.items()}
@@ -472,9 +592,10 @@ def get_target_location(X, Y, Z, image, xy_pixel_spacing, z_spacing, x_stage_dir
     profile_config = get_profile_config(LLSM)
     class_info = get_class_info(profile_config)
 
-    logging_directory = get_logging_directory()
-    logging_directory.mkdir(parents=True, exist_ok=True)
-    create_exp_folder(logging_directory)
+    if is_logging_enabled():
+        logging_directory = get_logging_directory()
+        logging_directory.mkdir(parents=True, exist_ok=True)
+        create_exp_folder(logging_directory)
 
     new_X, new_Y, new_Z, class_list = process_montage(
         X,
