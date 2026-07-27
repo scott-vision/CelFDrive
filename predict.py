@@ -15,6 +15,7 @@ import yaml
 
 CONFIG_PATH = Path(__file__).resolve().parent / "celfdrive_predict.yaml"
 CONFIG_REF_PATTERN = re.compile(r"\$\{([^}]+)\}")
+SUPPORTED_BACKENDS = {"ultralytics_yolo", "rfdetr", "torchscript"}
 
 config = None
 model = None
@@ -49,7 +50,27 @@ def load_predict_config(config_path=CONFIG_PATH):
     if raw_config.get("schema_version") != 1:
         raise ValueError("Unsupported celfdrive_predict.yaml schema_version")
 
+    migrate_predict_config(raw_config)
     return _expand_config_value(raw_config, raw_config)
+
+
+def migrate_predict_config(raw_config):
+    if "profile" not in raw_config and "profiles" in raw_config:
+        raw_config["profile"] = raw_config["profiles"].get("sdc", next(iter(raw_config["profiles"].values())))
+        raw_config.pop("profiles", None)
+        raw_config["profile"].pop("llsm", None)
+    no_detection = raw_config.get("no_detection", {})
+    if "mode" not in no_detection:
+        if no_detection.get("return_original_first_position", True):
+            no_detection["mode"] = "empty_3i_capture_script"
+        else:
+            no_detection["mode"] = "end_workflow"
+    if no_detection.get("mode") == "do_nothing":
+        no_detection["mode"] = "end_workflow"
+    if "empty_3i_capture_script" not in no_detection:
+        no_detection["empty_3i_capture_script"] = no_detection.get("script", "donothing")
+    for key in ["n_returned_locations", "script", "name", "comment", "return_original_first_position"]:
+        no_detection.pop(key, None)
 
 
 def get_config():
@@ -65,7 +86,7 @@ def get_model():
         return model
 
     cfg = get_config()
-    backend = normalize_backend(cfg["model"].get("backend", "ultralytics_yolo"))
+    backend = get_backend(cfg)
     weights_path = cfg["model"]["weights_path"]
 
     if backend == "ultralytics_yolo":
@@ -94,23 +115,11 @@ def get_model():
     return model
 
 
-def normalize_backend(backend):
-    backend_key = str(backend).strip().lower().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "ultrayltics_yolo": "ultralytics_yolo",
-        "ultralytics_yolo": "ultralytics_yolo",
-        "rfdetr": "rfdetr",
-        "rf_detr": "rfdetr",
-        "torchscript": "torchscript",
-        "torch_script": "torchscript",
-    }
-    return aliases.get(backend_key, backend_key)
-
-
-def get_profile_config(LLSM):
-    profiles = get_config()["profiles"]
-    profile_name = "llsm" if LLSM else "sdc"
-    return profiles[profile_name]
+def get_backend(cfg):
+    backend = cfg["model"].get("backend", "ultralytics_yolo")
+    if backend not in SUPPORTED_BACKENDS:
+        raise ValueError(f"Unsupported model backend: {backend}. Expected one of {sorted(SUPPORTED_BACKENDS)}")
+    return backend
 
 
 def get_class_info(profile_config):
@@ -339,7 +348,7 @@ def adjust_coordinates(detections, x_offset, y_offset):
 
 def run_model_inference(img, conf):
     cfg = get_config()
-    backend = normalize_backend(cfg["model"].get("backend", "ultralytics_yolo"))
+    backend = get_backend(cfg)
     current_model = get_model()
 
     if backend == "ultralytics_yolo":
@@ -428,7 +437,7 @@ def xyxy_to_detection(box, score, cls):
 def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=False):
     cfg = get_config()
     if class_info is None:
-        class_info = get_class_info(cfg["profiles"]["sdc"])
+        class_info = get_class_info(cfg["profile"])
     if conf is None:
         conf = get_inference_confidence(class_info)
 
@@ -589,7 +598,7 @@ def get_target_location(X, Y, Z, image, xy_pixel_spacing, z_spacing, x_stage_dir
         Y = [Y]
         Z = [Z]
 
-    profile_config = get_profile_config(LLSM)
+    profile_config = cfg["profile"]
     class_info = get_class_info(profile_config)
 
     if is_logging_enabled():
@@ -615,16 +624,8 @@ def get_target_location(X, Y, Z, image, xy_pixel_spacing, z_spacing, x_stage_dir
     N = len(new_X)
 
     if N == 0:
-        no_detection_cfg = cfg["no_detection"]
-        N = no_detection_cfg.get("n_returned_locations", 1)
-        if no_detection_cfg.get("return_original_first_position", True):
-            new_X = np.array([X[0]] * N)
-            new_Y = np.array([Y[0]] * N)
-            new_Z = np.array([Z[0]] * N)
-            script_list = [no_detection_cfg.get("script", "donothing")] * N
-            name_list = [no_detection_cfg.get("name", "nothing")] * N
-            comment_list = [no_detection_cfg.get("comment", "nothing")] * N
-        else:
+        no_detection_mode = cfg["no_detection"].get("mode", "empty_3i_capture_script")
+        if no_detection_mode == "end_workflow":
             N = 0
             new_X = np.array([])
             new_Y = np.array([])
@@ -632,6 +633,16 @@ def get_target_location(X, Y, Z, image, xy_pixel_spacing, z_spacing, x_stage_dir
             script_list = []
             name_list = []
             comment_list = []
+        elif no_detection_mode == "empty_3i_capture_script":
+            N = 1
+            new_X = np.array([X[0]])
+            new_Y = np.array([Y[0]])
+            new_Z = np.array([Z[0]])
+            script_list = [cfg["no_detection"].get("empty_3i_capture_script", "donothing")]
+            name_list = ["nothing"]
+            comment_list = ["nothing"]
+        else:
+            raise ValueError(f"Unsupported no_detection mode: {no_detection_mode}")
     else:
         script_list = [profile_config["highres_script"] for i in range(N)]
         name_list = [

@@ -166,7 +166,35 @@ class ConfigEditor:
             dict: Parsed YAML config.
         """
         with open(self.config_path, "r", encoding="utf-8") as file:
-            return yaml.safe_load(file)
+            config = yaml.safe_load(file)
+        self.migrate_config(config)
+        return config
+
+    def migrate_config(self, config):
+        """Update older config shapes to the current single-profile schema.
+
+        Args:
+            config (dict): Parsed YAML config to migrate in place.
+
+        Returns:
+            None
+        """
+        if "profile" not in config and "profiles" in config:
+            config["profile"] = config["profiles"].get("sdc", next(iter(config["profiles"].values())))
+            config.pop("profiles", None)
+            config["profile"].pop("llsm", None)
+        no_detection = config.get("no_detection", {})
+        if "mode" not in no_detection:
+            if no_detection.get("return_original_first_position", True):
+                no_detection["mode"] = "empty_3i_capture_script"
+            else:
+                no_detection["mode"] = "end_workflow"
+        if no_detection.get("mode") == "do_nothing":
+            no_detection["mode"] = "end_workflow"
+        if "empty_3i_capture_script" not in no_detection:
+            no_detection["empty_3i_capture_script"] = no_detection.get("script", "donothing")
+        for key in ["n_returned_locations", "script", "name", "comment", "return_original_first_position"]:
+            no_detection.pop(key, None)
 
     def build_ui(self):
         """Create the notebook tabs and bottom action bar.
@@ -204,13 +232,13 @@ class ConfigEditor:
         general = self.add_tab(self.main_notebook, "General")
         preprocessing = self.add_tab(self.main_notebook, "Image")
         coordinates = self.add_tab(self.main_notebook, "Coordinates")
-        profiles = self.add_tab(self.main_notebook, "Profiles")
+        profile = self.add_tab(self.main_notebook, "Profile")
         advanced = self.add_tab(self.main_notebook, "Advanced")
 
         self.build_general_tab(general)
         self.build_image_tab(preprocessing)
         self.build_coordinates_tab(coordinates)
-        self.build_profiles_tab(profiles)
+        self.build_profiles_tab(profile)
         self.build_advanced_tab(advanced)
 
         action_bar = ttk.Frame(self.root)
@@ -550,17 +578,14 @@ class ConfigEditor:
         self.add_field(conversion, 2, "Stage direction x", ["coordinate_conversion", "stage_direction", "x"], int)
         self.add_field(conversion, 3, "Stage direction y", ["coordinate_conversion", "stage_direction", "y"], int)
         self.add_field(conversion, 4, "Stage direction z", ["coordinate_conversion", "stage_direction", "z"], int)
-        self.add_field(conversion, 5, "LLSM invert y stage", ["coordinate_conversion", "llsm", "invert_y_stage_direction"], bool)
+        self.add_field(conversion, 5, "LLSM mode: invert Y stage direction", ["coordinate_conversion", "llsm", "invert_y_stage_direction"], bool)
 
         no_detection = self.add_section(parent, "No Detection", 1)
-        self.add_field(no_detection, 0, "Returned locations", ["no_detection", "n_returned_locations"], int)
-        self.add_field(no_detection, 1, "Script", ["no_detection", "script"])
-        self.add_field(no_detection, 2, "Name", ["no_detection", "name"])
-        self.add_field(no_detection, 3, "Comment", ["no_detection", "comment"])
-        self.add_field(no_detection, 4, "Return original first position", ["no_detection", "return_original_first_position"], bool)
+        self.add_dropdown(no_detection, 0, "Mode", ["no_detection", "mode"], ["end_workflow", "empty_3i_capture_script"])
+        self.add_field(no_detection, 1, "Empty 3i capture script", ["no_detection", "empty_3i_capture_script"])
 
     def build_profiles_tab(self, parent):
-        """Build the profile notebook for all configured capture profiles.
+        """Build controls for the single configured capture profile.
 
         Args:
             parent (tk.Widget): Tab content frame.
@@ -568,35 +593,24 @@ class ConfigEditor:
         Returns:
             None
         """
-        self.profile_notebook = ttk.Notebook(parent)
-        self.profile_notebook.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
         parent.columnconfigure(0, weight=1)
-        self.profile_tab_names = []
+        self.build_profile(parent)
 
-        for profile_name in self.config["profiles"]:
-            frame = ttk.Frame(self.profile_notebook, padding=10)
-            frame.columnconfigure(0, weight=1)
-            self.profile_notebook.add(frame, text=profile_name)
-            self.profile_tab_names.append(profile_name)
-            self.build_profile(frame, profile_name)
-
-    def build_profile(self, parent, profile_name):
-        """Build controls for one capture profile and its class table.
+    def build_profile(self, parent):
+        """Build controls for the capture profile and its class table.
 
         Args:
             parent (tk.Widget): Profile tab frame.
-            profile_name (str): Key of the profile in ``config["profiles"]``.
 
         Returns:
             None
         """
         profile = self.add_section(parent, "Capture", 0)
-        base = ["profiles", profile_name]
+        base = ["profile"]
         self.add_field(profile, 0, "Description", base + ["description"])
-        self.add_field(profile, 1, "LLSM profile", base + ["llsm"], bool)
-        self.add_field(profile, 2, "Highres script", base + ["highres_script"])
-        self.add_field(profile, 3, "Highres comment", base + ["highres_comment"])
-        self.add_field(profile, 4, "Name template", base + ["name_template"])
+        self.add_field(profile, 1, "Highres script", base + ["highres_script"])
+        self.add_field(profile, 2, "Highres comment", base + ["highres_comment"])
+        self.add_field(profile, 3, "Name template", base + ["name_template"])
 
         classes = self.add_section(parent, "Classes", 1)
         headings = ["ID", "Name", "Confidence threshold", "Priority rank", ""]
@@ -604,7 +618,7 @@ class ConfigEditor:
             ttk.Label(classes, text=heading).grid(row=0, column=col, sticky="w", padx=4, pady=(0, 6))
         classes.columnconfigure(1, weight=1)
 
-        class_configs = self.config["profiles"][profile_name]["classes"]
+        class_configs = self.config["profile"]["classes"]
         for row, class_id in enumerate(sorted(class_configs.keys(), key=int), start=1):
             ttk.Label(classes, text=str(class_id)).grid(row=row, column=0, sticky="w", padx=4, pady=3)
             class_base = base + ["classes", class_id]
@@ -617,14 +631,14 @@ class ConfigEditor:
             ttk.Button(
                 classes,
                 text="Remove",
-                command=lambda profile_name=profile_name, class_id=class_id: self.remove_class(profile_name, class_id),
+                command=lambda class_id=class_id: self.remove_class(class_id),
             ).grid(row=row, column=4, sticky="ew", padx=4, pady=3)
 
         add_row = len(class_configs) + 1
         ttk.Button(
             classes,
             text="Add class",
-            command=lambda profile_name=profile_name: self.add_class(profile_name),
+            command=self.add_class,
         ).grid(row=add_row, column=0, columnspan=5, sticky="w", padx=4, pady=(8, 0))
 
     def apply_vars_to_config(self):
@@ -647,7 +661,7 @@ class ConfigEditor:
 
         Args:
             selected_main_tab (str | None): Main tab title to select after rebuilding.
-            selected_profile (str | None): Profile tab key to select after rebuilding.
+            selected_profile (str | None): Deprecated. Ignored because there is one profile.
 
         Returns:
             None
@@ -663,7 +677,7 @@ class ConfigEditor:
 
         Args:
             selected_main_tab (str | None): Main tab title to select.
-            selected_profile (str | None): Profile tab key to select.
+            selected_profile (str | None): Deprecated. Ignored because there is one profile.
 
         Returns:
             None
@@ -674,17 +688,11 @@ class ConfigEditor:
                     self.main_notebook.select(tab_id)
                     break
 
-        if selected_profile is not None and hasattr(self, "profile_notebook"):
-            for tab_id in self.profile_notebook.tabs():
-                if self.profile_notebook.tab(tab_id, "text") == selected_profile:
-                    self.profile_notebook.select(tab_id)
-                    break
-
-    def add_class(self, profile_name):
+    def add_class(self):
         """Add a new class to a profile using the next available numeric class ID.
 
         Args:
-            profile_name (str): Profile key under ``config["profiles"]``.
+            None
 
         Returns:
             None
@@ -695,7 +703,7 @@ class ConfigEditor:
             messagebox.showerror("Cannot add class", str(exc))
             return
 
-        classes = self.config["profiles"][profile_name]["classes"]
+        classes = self.config["profile"]["classes"]
         numeric_ids = [int(class_id) for class_id in classes.keys()]
         next_class_id = max(numeric_ids, default=-1) + 1
         classes[next_class_id] = {
@@ -703,13 +711,12 @@ class ConfigEditor:
             "confidence_threshold": 0.01,
             "priority_rank": next_class_id,
         }
-        self.rebuild_ui(selected_main_tab="Profiles", selected_profile=profile_name)
+        self.rebuild_ui(selected_main_tab="Profile")
 
-    def remove_class(self, profile_name, class_id):
+    def remove_class(self, class_id):
         """Remove one class from a profile after confirmation.
 
         Args:
-            profile_name (str): Profile key under ``config["profiles"]``.
             class_id (int | str): Class ID key to remove.
 
         Returns:
@@ -721,7 +728,7 @@ class ConfigEditor:
             messagebox.showerror("Cannot remove class", str(exc))
             return
 
-        classes = self.config["profiles"][profile_name]["classes"]
+        classes = self.config["profile"]["classes"]
         if len(classes) <= 1:
             messagebox.showwarning("Cannot remove class", "Each profile must keep at least one class.")
             return
@@ -729,13 +736,13 @@ class ConfigEditor:
         class_name = classes[class_id].get("name", class_id)
         should_remove = messagebox.askyesno(
             "Remove class",
-            f"Remove class {class_id}: {class_name} from the {profile_name} profile?",
+            f"Remove class {class_id}: {class_name}?",
         )
         if not should_remove:
             return
 
         del classes[class_id]
-        self.rebuild_ui(selected_main_tab="Profiles", selected_profile=profile_name)
+        self.rebuild_ui(selected_main_tab="Profile")
 
     def parse_var(self, var, value_type, path):
         """Convert a Tk variable into the expected Python type.

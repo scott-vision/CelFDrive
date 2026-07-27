@@ -48,71 +48,35 @@ coordinate_conversion:
   llsm:
     invert_y_stage_direction: true
 no_detection:
-  n_returned_locations: 1
-  script: donothing
-  name: nothing
-  comment: nothing
-  return_original_first_position: true
-profiles:
-  sdc:
-    description: Spinning disk / non-LLSM high-resolution capture profile
-    llsm: false
-    highres_script: floifmHighres
-    highres_comment: Highres
-    name_template: '{class_name} Highres x {x}, Y {y}, Z {z}'
-    classes:
-      0:
-        name: prophase
-        confidence_threshold: 0.01
-        priority_rank: 1
-      1:
-        name: earlyprometaphase
-        confidence_threshold: 0.01
-        priority_rank: 0
-      2:
-        name: prometaphase
-        confidence_threshold: 0.01
-        priority_rank: 2
-      3:
-        name: metaphase
-        confidence_threshold: 0.01
-        priority_rank: 3
-      4:
-        name: anaphase
-        confidence_threshold: 0.01
-        priority_rank: 4
-      5:
-        name: telophase
-        confidence_threshold: 0.05
-        priority_rank: 5
-  llsm:
-    description: Lattice light-sheet capture profile
-    llsm: true
-    highres_script: find-loc-out
-    highres_comment: Highres
-    name_template: '{class_name} Highres x {x}, Y {y}, Z {z}'
-    classes:
-      0:
-        name: prophase
-        confidence_threshold: 0.1
-        priority_rank: 1
-      1:
-        name: earlyprometaphase
-        confidence_threshold: 0.2
-        priority_rank: 0
-      2:
-        name: prometaphase
-        confidence_threshold: 1.0
-        priority_rank: 2
-      3:
-        name: metaphase
-        confidence_threshold: 1.0
-        priority_rank: 3
-      4:
-        name: anaphase
-        confidence_threshold: 1.0
-        priority_rank: 4
-      5:
-        name: telophase
-        confidence_threshold: 1.0
-        priority_rank: 5
+  mode: empty_3i_capture_script
+  empty_3i_capture_script: donothing
+profile:
+  description: High-resolution capture profile
+  highres_script: floifmHighres
+  highres_comment: Highres
+  name_template: '{class_name} Highres x {x}, Y {y}, Z {z}'
+  classes:
+    0:
+      name: prophase
+      confidence_threshold: 0.01
+      priority_rank: 1
+    1:
+      name: earlyprometaphase
+      confidence_threshold: 0.01
+      priority_rank: 0
+    2:
+      name: prometaphase
+      confidence_threshold: 0.01
+      priority_rank: 2
+    3:
+      name: metaphase
+      confidence_threshold: 0.01
+      priority_rank: 3
+    4:
+      name: anaphase
+      confidence_threshold: 0.01
+      priority_rank: 4
+    5:
+      name: telophase
+      confidence_threshold: 0.05
+      priority_rank: 5
