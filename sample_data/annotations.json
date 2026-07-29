@@ -1,0 +1,5 @@
+{
+  "image": "synthetic_blank_image.csv",
+  "coordinate_system": "pixel coordinates with origin at the top-left corner",
+  "annotations": []
+}

@@ -4,6 +4,8 @@ This module provides a small GUI for editing ``celfdrive_predict.yaml``.
 """
 
 from pathlib import Path
+import math
+from numbers import Real
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -14,6 +16,197 @@ REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = REPO_ROOT / "celfdrive_predict.yaml"
 CONFIG_DIR = REPO_ROOT / "Configs"
 CONFIG_PATH = DEFAULT_CONFIG_PATH
+
+
+def validate_prediction_config(config):
+    """Validate every persisted prediction setting before it is saved.
+
+    Raises:
+        ValueError: If a setting is incompatible with the prediction workflow.
+    """
+    if not isinstance(config, dict):
+        raise ValueError("Prediction configuration must be a mapping")
+
+    project = _mapping(config.get("project"), "project")
+    _non_empty_string(project.get("repo_path"), "project.repo_path")
+
+    model = _mapping(config.get("model"), "model")
+    _non_empty_string(model.get("weights_path"), "model.weights_path")
+    if model.get("backend") != "ultralytics_yolo":
+        raise ValueError("model.backend must be 'ultralytics_yolo'")
+    _boolean(model.get("suppress_stdout"), "model.suppress_stdout")
+
+    logging = _mapping(config.get("logging"), "logging")
+    _boolean(logging.get("enabled"), "logging.enabled")
+    _non_empty_string(logging.get("root_dir"), "logging.root_dir")
+    _boolean(logging.get("use_date_subfolder"), "logging.use_date_subfolder")
+    _non_empty_string(logging.get("date_format"), "logging.date_format")
+    experiment_folder = _mapping(logging.get("experiment_folder"), "logging.experiment_folder")
+    _non_empty_string(experiment_folder.get("prefix"), "logging.experiment_folder.prefix")
+    _positive_integer(experiment_folder.get("digits"), "logging.experiment_folder.digits")
+    output_image = _mapping(logging.get("output_image"), "logging.output_image")
+    _non_empty_string(output_image.get("prefix"), "logging.output_image.prefix")
+    _positive_integer(output_image.get("digits"), "logging.output_image.digits")
+    extension = output_image.get("extension")
+    if not isinstance(extension, str) or not extension.startswith(".") or len(extension) == 1:
+        raise ValueError("logging.output_image.extension must be a file extension beginning with '.'")
+
+    preprocessing = _mapping(config.get("preprocessing"), "preprocessing")
+    input_channel = _mapping(preprocessing.get("input_channel"), "preprocessing.input_channel")
+    if input_channel.get("mode") != "first_channel_if_rgb":
+        raise ValueError("preprocessing.input_channel.mode must be 'first_channel_if_rgb'")
+    top_clip_percentile = _finite_float(
+        preprocessing.get("top_clip_percentile"), "preprocessing.top_clip_percentile"
+    )
+    if not 0 <= top_clip_percentile < 100:
+        raise ValueError("preprocessing.top_clip_percentile must be in [0, 100)")
+    _boolean(preprocessing.get("normalize_min_max"), "preprocessing.normalize_min_max")
+
+    tiling = _mapping(config.get("tiling"), "tiling")
+    _boolean(tiling.get("enabled"), "tiling.enabled")
+    tile_size_px = _positive_integer(tiling.get("tile_size_px"), "tiling.tile_size_px")
+    if tiling.get("edge_mode") != "shift_last_tile_inside_image":
+        raise ValueError("tiling.edge_mode must be 'shift_last_tile_inside_image'")
+    overlap_px = _non_negative_integer(tiling.get("overlap_px"), "tiling.overlap_px")
+    if overlap_px >= tile_size_px:
+        raise ValueError("tiling.overlap_px must be smaller than tiling.tile_size_px")
+    deduplication_tolerance_px = _finite_float(
+        tiling.get("deduplication_tolerance_px"), "tiling.deduplication_tolerance_px"
+    )
+    if deduplication_tolerance_px < 0:
+        raise ValueError("tiling.deduplication_tolerance_px must be non-negative")
+
+    coordinates = _mapping(config.get("coordinate_conversion"), "coordinate_conversion")
+    if coordinates.get("mode") not in {"stage", "pixel"}:
+        raise ValueError("coordinate_conversion.mode must be 'stage' or 'pixel'; callable mode is API-only")
+    _finite_float(coordinates.get("default_z_offset_um"), "coordinate_conversion.default_z_offset_um")
+    merge_tolerance_um = _finite_float(
+        coordinates.get("merge_tolerance_um"), "coordinate_conversion.merge_tolerance_um"
+    )
+    if merge_tolerance_um < 0:
+        raise ValueError("coordinate_conversion.merge_tolerance_um must be non-negative")
+    stage_direction = _mapping(coordinates.get("stage_direction"), "coordinate_conversion.stage_direction")
+    if set(stage_direction) != {"x", "y", "z"}:
+        raise ValueError("coordinate_conversion.stage_direction must contain x, y, and z values of -1 or 1")
+    if any(not _is_stage_direction(value) for value in stage_direction.values()):
+        raise ValueError("coordinate_conversion.stage_direction must contain x, y, and z values of -1 or 1")
+    llsm = _mapping(coordinates.get("llsm"), "coordinate_conversion.llsm")
+    _boolean(llsm.get("invert_y_stage_direction"), "coordinate_conversion.llsm.invert_y_stage_direction")
+
+    no_detection = _mapping(config.get("no_detection"), "no_detection")
+    if no_detection.get("mode") not in {"end_workflow", "empty_3i_capture_script"}:
+        raise ValueError("no_detection.mode must be 'end_workflow' or 'empty_3i_capture_script'")
+    if no_detection["mode"] == "empty_3i_capture_script":
+        _non_empty_string(no_detection.get("empty_3i_capture_script"), "no_detection.empty_3i_capture_script")
+
+    plotting = _mapping(config.get("plotting"), "plotting")
+    _boolean(plotting.get("enabled"), "plotting.enabled")
+    _non_empty_string(plotting.get("cmap"), "plotting.cmap")
+    bbox = _mapping(plotting.get("bbox"), "plotting.bbox")
+    _non_empty_string(bbox.get("edge_color"), "plotting.bbox.edge_color")
+    if _finite_float(bbox.get("line_width"), "plotting.bbox.line_width") <= 0:
+        raise ValueError("plotting.bbox.line_width must be positive")
+    label = _mapping(plotting.get("label"), "plotting.label")
+    _positive_integer(label.get("font_size"), "plotting.label.font_size")
+    _non_empty_string(label.get("text_color"), "plotting.label.text_color")
+    _non_empty_string(label.get("background_color"), "plotting.label.background_color")
+    background_alpha = _finite_float(label.get("background_alpha"), "plotting.label.background_alpha")
+    if not 0 <= background_alpha <= 1:
+        raise ValueError("plotting.label.background_alpha must be between 0 and 1")
+
+    profile = _mapping(config.get("profile"), "profile")
+    if not isinstance(profile.get("description"), str):
+        raise ValueError("profile.description must be a string")
+    if not isinstance(profile.get("highres_comment"), str):
+        raise ValueError("profile.highres_comment must be a string")
+    highres_script = profile.get("highres_script", "")
+    if not isinstance(highres_script, str) or not highres_script.strip():
+        raise ValueError("profile.highres_script must name the SlideBook postscan script")
+
+    classes = profile.get("classes", {})
+    if not isinstance(classes, dict) or not classes:
+        raise ValueError("At least one detection class is required")
+
+    names = set()
+    for class_id, class_config in classes.items():
+        class_config = _mapping(class_config, f"Class {class_id}")
+        try:
+            int(class_id)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Class ID {class_id!r} must be an integer") from error
+
+        name = class_config.get("name", "")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"Class {class_id} must have a name")
+        name_key = name.casefold()
+        if name_key in names:
+            raise ValueError(f"Class name {name!r} is duplicated")
+        names.add(name_key)
+
+        try:
+            threshold = float(class_config["confidence_threshold"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"Class {class_id} confidence threshold must be a number") from error
+        if not 0 <= threshold <= 1:
+            raise ValueError(f"Class {class_id} confidence threshold must be between 0 and 1")
+
+        try:
+            priority = _integer(class_config["priority_rank"], f"Class {class_id} capture priority")
+        except (KeyError, ValueError) as error:
+            raise ValueError(f"Class {class_id} capture priority must be an integer") from error
+        if priority < -1:
+            raise ValueError(f"Class {class_id} capture priority must be -1 or greater")
+
+    name_template = profile.get("name_template")
+    _non_empty_string(name_template, "profile.name_template")
+    try:
+        name_template.format(class_name="class", x=0, y=0, z=0)
+    except (KeyError, ValueError, IndexError) as error:
+        raise ValueError("profile.name_template may only use {class_name}, {x}, {y}, and {z}") from error
+
+
+def _non_empty_string(value, name):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+
+
+def _mapping(value, name):
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} must be a mapping")
+    return value
+
+
+def _boolean(value, name):
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be true or false")
+
+
+def _integer(value, name):
+    if isinstance(value, bool) or not isinstance(value, Real) or int(value) != value:
+        raise ValueError(f"{name} must be an integer")
+    return int(value)
+
+
+def _is_stage_direction(value):
+    return not isinstance(value, bool) and isinstance(value, Real) and value in {-1, 1}
+
+
+def _finite_float(value, name):
+    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number")
+    return float(value)
+
+
+def _positive_integer(value, name):
+    if isinstance(value, bool) or not isinstance(value, Real) or int(value) != value or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(value)
+
+
+def _non_negative_integer(value, name):
+    if isinstance(value, bool) or not isinstance(value, Real) or int(value) != value or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return int(value)
 
 
 class ScrollableFrame(ttk.Frame):
@@ -140,13 +333,14 @@ class ConfigEditor:
         return sorted(CONFIG_DIR.glob("*.yaml"))
 
     def get_initial_config_path(self):
-        """Choose the initial editable config path.
+        """Choose the default editable config path.
 
         Args:
             None
 
         Returns:
-            Path: First YAML config file in ``Configs``.
+            Path: ``Configs/default.yaml`` when available, otherwise the first
+                alphabetically sorted YAML file in ``Configs``.
 
         Raises:
             FileNotFoundError: If no editable configs are available.
@@ -154,6 +348,9 @@ class ConfigEditor:
         config_files = self.get_config_files()
         if not config_files:
             raise FileNotFoundError(f"No YAML configs found in {CONFIG_DIR}")
+        default_config = CONFIG_DIR / "default.yaml"
+        if default_config in config_files:
+            return default_config
         return config_files[0]
 
     def load_config(self):
@@ -232,20 +429,22 @@ class ConfigEditor:
         general = self.add_tab(self.main_notebook, "General")
         preprocessing = self.add_tab(self.main_notebook, "Image")
         coordinates = self.add_tab(self.main_notebook, "Coordinates")
-        profile = self.add_tab(self.main_notebook, "Profile")
+        high_resolution = self.add_tab(self.main_notebook, "High Resolution Imaging")
         advanced = self.add_tab(self.main_notebook, "Advanced")
 
         self.build_general_tab(general)
         self.build_image_tab(preprocessing)
         self.build_coordinates_tab(coordinates)
-        self.build_profiles_tab(profile)
+        self.build_high_resolution_tab(high_resolution)
         self.build_advanced_tab(advanced)
 
         action_bar = ttk.Frame(self.root)
         action_bar.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
         action_bar.columnconfigure(0, weight=1)
 
-        self.status_var = tk.StringVar(value=f"Editing {self.config_path}. Active default is {DEFAULT_CONFIG_PATH.name}.")
+        self.status_var = tk.StringVar(
+            value=f"Editing {self.config_path.name}. CelFDrive uses {DEFAULT_CONFIG_PATH.name} by default."
+        )
         ttk.Label(action_bar, textvariable=self.status_var).grid(row=0, column=0, sticky="w")
         ttk.Button(action_bar, text="Reload", command=self.reload).grid(row=0, column=1, padx=4)
         ttk.Button(action_bar, text="Save", command=self.save).grid(row=0, column=2, padx=4)
@@ -262,6 +461,7 @@ class ConfigEditor:
             ttk.Frame: Content frame where controls should be added.
         """
         frame = ScrollableFrame(notebook)
+        frame.content.columnconfigure(0, weight=1)
         notebook.add(frame, text=title)
         return frame.content
 
@@ -328,6 +528,16 @@ class ConfigEditor:
         section.columnconfigure(1, weight=1)
         return section
 
+    def add_hint(self, parent, row, text, columnspan=2):
+        """Add a wrapped explanatory label below a form section heading."""
+        ttk.Label(parent, text=text, justify="left", wraplength=820).grid(
+            row=row,
+            column=0,
+            columnspan=columnspan,
+            sticky="w",
+            pady=(0, 8),
+        )
+
     def add_field(self, parent, row, label, path, value_type=str, browse=None):
         """Add a labelled input bound to a config path.
 
@@ -367,12 +577,13 @@ class ConfigEditor:
             options (list[str]): Allowed string values.
 
         Returns:
-            None
+            ttk.Combobox: Dropdown widget bound to the config value.
         """
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
         var = self.make_var(path, str)
         widget = ttk.Combobox(parent, textvariable=var, values=options, state="readonly")
         widget.grid(row=row, column=1, sticky="ew", pady=4)
+        return widget
 
     def browse_path(self, var, browse):
         """Open a file or directory picker and write the selected path to a variable.
@@ -504,10 +715,17 @@ class ConfigEditor:
             None
         """
         project = self.add_section(parent, "Project And Model", 0)
-        self.add_field(project, 0, "Repo path", ["project", "repo_path"], browse="dir")
-        self.add_field(project, 1, "Weights path", ["model", "weights_path"], browse="file")
-        self.add_dropdown(project, 2, "Backend", ["model", "backend"], ["ultralytics_yolo", "rfdetr", "torchscript"])
-        self.add_field(project, 3, "Suppress model stdout", ["model", "suppress_stdout"], bool)
+        self.add_hint(
+            project,
+            0,
+            "Select the CelFDrive project root: the folder cloned from GitHub that contains "
+            "celfdrive_predict.yaml. Logs are saved in its Logging folder by default.",
+            columnspan=3,
+        )
+        self.add_field(project, 1, "CelFDrive project root", ["project", "repo_path"], browse="dir")
+        self.add_field(project, 2, "Model weights", ["model", "weights_path"], browse="file")
+        self.add_dropdown(project, 3, "Backend", ["model", "backend"], ["ultralytics_yolo"])
+        self.add_field(project, 4, "Suppress model stdout", ["model", "suppress_stdout"], bool)
 
         logging = self.add_section(parent, "Logging", 1)
         self.add_field(logging, 0, "Enabled", ["logging", "enabled"], bool)
@@ -525,15 +743,40 @@ class ConfigEditor:
             None
         """
         preprocessing = self.add_section(parent, "Preprocessing", 0)
-        self.add_field(preprocessing, 0, "Input channel mode", ["preprocessing", "input_channel", "mode"])
-        self.add_field(preprocessing, 1, "Top clip percentile", ["preprocessing", "top_clip_percentile"], float)
-        self.add_field(preprocessing, 2, "Normalize min/max", ["preprocessing", "normalize_min_max"], bool)
+        self.add_dropdown(
+            preprocessing,
+            0,
+            "Input channel mode",
+            ["preprocessing", "input_channel", "mode"],
+            ["first_channel_if_rgb"],
+        )
+        self.add_hint(
+            preprocessing,
+            1,
+            "For an RGB input, CelFDrive uses the first channel. Two-dimensional images are used directly.",
+            columnspan=3,
+        )
+        self.add_field(preprocessing, 2, "Top clip percentile", ["preprocessing", "top_clip_percentile"], float)
+        self.add_field(preprocessing, 3, "Normalize min/max", ["preprocessing", "normalize_min_max"], bool)
 
         tiling = self.add_section(parent, "Tiling", 1)
         self.add_field(tiling, 0, "Enabled", ["tiling", "enabled"], bool)
         self.add_field(tiling, 1, "Tile size px", ["tiling", "tile_size_px"], int)
-        self.add_field(tiling, 2, "Edge mode", ["tiling", "edge_mode"])
+        self.add_dropdown(
+            tiling,
+            2,
+            "Edge mode",
+            ["tiling", "edge_mode"],
+            ["shift_last_tile_inside_image"],
+        )
         self.add_field(tiling, 3, "Overlap px", ["tiling", "overlap_px"], int)
+        self.add_field(tiling, 4, "De-duplication tolerance px", ["tiling", "deduplication_tolerance_px"], float)
+        self.add_hint(
+            tiling,
+            5,
+            "De-duplication compares detection centres in the overview image, before conversion to stage coordinates.",
+            columnspan=3,
+        )
 
     def build_advanced_tab(self, parent):
         """Build advanced logging and plotting detail controls.
@@ -545,14 +788,20 @@ class ConfigEditor:
             None
         """
         logging = self.add_section(parent, "Logging Details", 0)
-        self.add_field(logging, 0, "Root directory", ["logging", "root_dir"], browse="dir")
-        self.add_field(logging, 1, "Use date subfolder", ["logging", "use_date_subfolder"], bool)
-        self.add_field(logging, 2, "Date format", ["logging", "date_format"])
-        self.add_field(logging, 3, "Experiment prefix", ["logging", "experiment_folder", "prefix"])
-        self.add_field(logging, 4, "Experiment digits", ["logging", "experiment_folder", "digits"], int)
-        self.add_field(logging, 5, "Output image prefix", ["logging", "output_image", "prefix"])
-        self.add_field(logging, 6, "Output image digits", ["logging", "output_image", "digits"], int)
-        self.add_field(logging, 7, "Output image extension", ["logging", "output_image", "extension"])
+        self.add_hint(
+            logging,
+            0,
+            "Log paths are relative to the CelFDrive project root. The default Logging folder is suitable for most workflows.",
+            columnspan=3,
+        )
+        self.add_field(logging, 1, "Log directory", ["logging", "root_dir"], browse="dir")
+        self.add_field(logging, 2, "Use date subfolder", ["logging", "use_date_subfolder"], bool)
+        self.add_field(logging, 3, "Date format", ["logging", "date_format"])
+        self.add_field(logging, 4, "Experiment prefix", ["logging", "experiment_folder", "prefix"])
+        self.add_field(logging, 5, "Experiment digits", ["logging", "experiment_folder", "digits"], int)
+        self.add_field(logging, 6, "Output image prefix", ["logging", "output_image", "prefix"])
+        self.add_field(logging, 7, "Output image digits", ["logging", "output_image", "digits"], int)
+        self.add_field(logging, 8, "Output image extension", ["logging", "output_image", "extension"])
 
         plotting = self.add_section(parent, "Plotting Details", 1)
         self.add_field(plotting, 0, "Color map", ["plotting", "cmap"])
@@ -573,19 +822,44 @@ class ConfigEditor:
             None
         """
         conversion = self.add_section(parent, "Coordinate Conversion", 0)
-        self.add_field(conversion, 0, "Default z offset um", ["coordinate_conversion", "default_z_offset_um"], float)
-        self.add_field(conversion, 1, "Merge tolerance um", ["coordinate_conversion", "merge_tolerance_um"], float)
-        self.add_field(conversion, 2, "Stage direction x", ["coordinate_conversion", "stage_direction", "x"], int)
-        self.add_field(conversion, 3, "Stage direction y", ["coordinate_conversion", "stage_direction", "y"], int)
-        self.add_field(conversion, 4, "Stage direction z", ["coordinate_conversion", "stage_direction", "z"], int)
-        self.add_field(conversion, 5, "LLSM mode: invert Y stage direction", ["coordinate_conversion", "llsm", "invert_y_stage_direction"], bool)
+        self.add_dropdown(conversion, 0, "Coordinate mode", ["coordinate_conversion", "mode"], ["stage", "pixel"])
+        self.add_field(conversion, 1, "Default z offset um", ["coordinate_conversion", "default_z_offset_um"], float)
+        self.add_field(conversion, 2, "Merge tolerance um", ["coordinate_conversion", "merge_tolerance_um"], float)
+        self.add_field(conversion, 3, "Stage direction x", ["coordinate_conversion", "stage_direction", "x"], int)
+        self.add_field(conversion, 4, "Stage direction y", ["coordinate_conversion", "stage_direction", "y"], int)
+        self.add_field(conversion, 5, "Stage direction z", ["coordinate_conversion", "stage_direction", "z"], int)
+        self.add_field(conversion, 6, "LLSM mode: invert Y stage direction", ["coordinate_conversion", "llsm", "invert_y_stage_direction"], bool)
 
         no_detection = self.add_section(parent, "No Detection", 1)
-        self.add_dropdown(no_detection, 0, "Mode", ["no_detection", "mode"], ["end_workflow", "empty_3i_capture_script"])
-        self.add_field(no_detection, 1, "Empty 3i capture script", ["no_detection", "empty_3i_capture_script"])
+        mode_selector = self.add_dropdown(
+            no_detection,
+            0,
+            "Mode",
+            ["no_detection", "mode"],
+            ["end_workflow", "empty_3i_capture_script"],
+        )
+        self.no_detection_script_frame = ttk.Frame(no_detection)
+        self.no_detection_script_frame.grid(row=1, column=0, columnspan=3, sticky="ew")
+        self.no_detection_script_frame.columnconfigure(1, weight=1)
+        self.add_field(
+            self.no_detection_script_frame,
+            0,
+            "Empty 3i capture script",
+            ["no_detection", "empty_3i_capture_script"],
+        )
+        mode_selector.bind("<<ComboboxSelected>>", self.update_no_detection_fields)
+        self.update_no_detection_fields()
 
-    def build_profiles_tab(self, parent):
-        """Build controls for the single configured capture profile.
+    def update_no_detection_fields(self, _event=None):
+        """Show the fallback script only when the selected mode uses it."""
+        mode_var, _ = self.vars[("no_detection", "mode")]
+        if mode_var.get() == "empty_3i_capture_script":
+            self.no_detection_script_frame.grid()
+        else:
+            self.no_detection_script_frame.grid_remove()
+
+    def build_high_resolution_tab(self, parent):
+        """Build controls for the high-resolution capture workflow.
 
         Args:
             parent (tk.Widget): Tab content frame.
@@ -594,10 +868,10 @@ class ConfigEditor:
             None
         """
         parent.columnconfigure(0, weight=1)
-        self.build_profile(parent)
+        self.build_high_resolution_capture(parent)
 
-    def build_profile(self, parent):
-        """Build controls for the capture profile and its class table.
+    def build_high_resolution_capture(self, parent):
+        """Build controls for the postscan script and detection-class table.
 
         Args:
             parent (tk.Widget): Profile tab frame.
@@ -605,21 +879,39 @@ class ConfigEditor:
         Returns:
             None
         """
-        profile = self.add_section(parent, "Capture", 0)
+        profile = self.add_section(parent, "SlideBook high-resolution capture", 0)
         base = ["profile"]
-        self.add_field(profile, 0, "Description", base + ["description"])
-        self.add_field(profile, 1, "Highres script", base + ["highres_script"])
-        self.add_field(profile, 2, "Highres comment", base + ["highres_comment"])
-        self.add_field(profile, 3, "Name template", base + ["name_template"])
+        self.add_hint(
+            profile,
+            0,
+            "CelFDrive returns each selected target to this named SlideBook postscan script. "
+            "The script name must match the postscan script created in SlideBook.",
+        )
+        self.add_field(profile, 1, "Imaging description", base + ["description"])
+        self.add_field(profile, 2, "SlideBook postscan script", base + ["highres_script"])
+        self.add_field(profile, 3, "Capture comment", base + ["highres_comment"])
+        self.add_field(profile, 4, "Result name format", base + ["name_template"])
+        self.add_hint(
+            profile,
+            5,
+            "Use {class_name}, {x}, {y}, and {z} in the result name format to include the detected class and target coordinates.",
+        )
 
-        classes = self.add_section(parent, "Classes", 1)
-        headings = ["ID", "Name", "Confidence threshold", "Priority rank", ""]
+        classes = self.add_section(parent, "Detection classes and capture order", 1)
+        self.add_hint(
+            classes,
+            0,
+            "A detection must meet its minimum confidence to be used. Capture priority 0 runs first; "
+            "higher values run later. Set a priority of -1 to disable a class without deleting it.",
+            columnspan=5,
+        )
+        headings = ["ID", "Class name", "Minimum confidence", "Capture priority", ""]
         for col, heading in enumerate(headings):
-            ttk.Label(classes, text=heading).grid(row=0, column=col, sticky="w", padx=4, pady=(0, 6))
+            ttk.Label(classes, text=heading).grid(row=1, column=col, sticky="w", padx=4, pady=(0, 6))
         classes.columnconfigure(1, weight=1)
 
         class_configs = self.config["profile"]["classes"]
-        for row, class_id in enumerate(sorted(class_configs.keys(), key=int), start=1):
+        for row, class_id in enumerate(sorted(class_configs.keys(), key=int), start=2):
             ttk.Label(classes, text=str(class_id)).grid(row=row, column=0, sticky="w", padx=4, pady=3)
             class_base = base + ["classes", class_id]
             name_var = self.make_var(class_base + ["name"], str)
@@ -634,10 +926,10 @@ class ConfigEditor:
                 command=lambda class_id=class_id: self.remove_class(class_id),
             ).grid(row=row, column=4, sticky="ew", padx=4, pady=3)
 
-        add_row = len(class_configs) + 1
+        add_row = len(class_configs) + 2
         ttk.Button(
             classes,
-            text="Add class",
+            text="Add detection class",
             command=self.add_class,
         ).grid(row=add_row, column=0, columnspan=5, sticky="w", padx=4, pady=(8, 0))
 
@@ -655,6 +947,7 @@ class ConfigEditor:
         """
         for path, (var, value_type) in self.vars.items():
             self.set_value(list(path), self.parse_var(var, value_type, path))
+        validate_prediction_config(self.config)
 
     def rebuild_ui(self, selected_main_tab=None, selected_profile=None):
         """Recreate the full form from the current in-memory config.
@@ -711,7 +1004,7 @@ class ConfigEditor:
             "confidence_threshold": 0.01,
             "priority_rank": next_class_id,
         }
-        self.rebuild_ui(selected_main_tab="Profile")
+        self.rebuild_ui(selected_main_tab="High Resolution Imaging")
 
     def remove_class(self, class_id):
         """Remove one class from a profile after confirmation.
@@ -742,7 +1035,7 @@ class ConfigEditor:
             return
 
         del classes[class_id]
-        self.rebuild_ui(selected_main_tab="Profile")
+        self.rebuild_ui(selected_main_tab="High Resolution Imaging")
 
     def parse_var(self, var, value_type, path):
         """Convert a Tk variable into the expected Python type.

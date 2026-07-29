@@ -4,22 +4,49 @@ from datetime import datetime
 import contextlib
 import math
 import os
+from dataclasses import dataclass
+from numbers import Real
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import numpy as np
 import yaml
 
 
 CONFIG_PATH = Path(__file__).resolve().parent / "celfdrive_predict.yaml"
 CONFIG_REF_PATTERN = re.compile(r"\$\{([^}]+)\}")
-SUPPORTED_BACKENDS = {"ultralytics_yolo", "rfdetr", "torchscript"}
+SUPPORTED_BACKENDS = {"ultralytics_yolo"}
 
 config = None
 model = None
 experiment_path = None
+
+
+@dataclass(frozen=True)
+class Detection:
+    """A model detection in image pixel coordinates."""
+
+    class_id: int
+    x: float
+    y: float
+    width: float
+    height: float
+    confidence: float
+
+    @property
+    def centre_x(self):
+        return self.x + self.width / 2
+
+    @property
+    def centre_y(self):
+        return self.y + self.height / 2
+
+
+@dataclass(frozen=True)
+class CapturePosition:
+    """The physical stage position associated with one overview image."""
+
+    x: float
+    y: float
+    z: float
 
 
 def _get_nested_value(data, dotted_key):
@@ -44,6 +71,7 @@ def _expand_config_value(value, root_config):
 
 
 def load_predict_config(config_path=CONFIG_PATH):
+    """Load, migrate, and expand a CelFDrive prediction configuration file."""
     with open(config_path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file)
 
@@ -71,6 +99,11 @@ def migrate_predict_config(raw_config):
         no_detection["empty_3i_capture_script"] = no_detection.get("script", "donothing")
     for key in ["n_returned_locations", "script", "name", "comment", "return_original_first_position"]:
         no_detection.pop(key, None)
+    coordinate_conversion = raw_config.setdefault("coordinate_conversion", {})
+    coordinate_conversion.setdefault("mode", "stage")
+    tiling = raw_config.setdefault("tiling", {})
+    tiling.setdefault("overlap_px", 0)
+    tiling.setdefault("deduplication_tolerance_px", 1.0)
 
 
 def get_config():
@@ -89,28 +122,12 @@ def get_model():
     backend = get_backend(cfg)
     weights_path = cfg["model"]["weights_path"]
 
-    if backend == "ultralytics_yolo":
-        from ultralytics import YOLO
-
-        model = YOLO(weights_path)
-    elif backend == "rfdetr":
-        from rfdetr import RFDETRBase
-
-        try:
-            model = RFDETRBase(pretrain_weights=weights_path)
-        except TypeError:
-            model = RFDETRBase()
-            if hasattr(model, "load"):
-                model.load(weights_path)
-            else:
-                raise TypeError("RFDETRBase does not support loading weights with this adapter")
-    elif backend == "torchscript":
-        import torch
-
-        model = torch.jit.load(weights_path, map_location="cpu")
-        model.eval()
-    else:
+    if backend != "ultralytics_yolo":
         raise ValueError(f"Unsupported model backend: {backend}")
+
+    from ultralytics import YOLO
+
+    model = YOLO(weights_path)
 
     return model
 
@@ -123,6 +140,7 @@ def get_backend(cfg):
 
 
 def get_class_info(profile_config):
+    """Return class names, confidence thresholds, and priorities by class ID."""
     return {
         int(class_id): (
             class_config["name"],
@@ -134,6 +152,7 @@ def get_class_info(profile_config):
 
 
 def get_inference_confidence(class_info):
+    """Return the lowest class threshold needed to retain filterable detections."""
     # YOLO applies this threshold before class-specific filtering, so it must be
     # the lowest class confidence threshold to keep all later-filterable detections.
     return min(class_config[1] for class_config in class_info.values())
@@ -147,6 +166,8 @@ def get_logging_directory():
     cfg = get_config()
     logging_cfg = cfg["logging"]
     logging_directory = Path(logging_cfg["root_dir"])
+    if not logging_directory.is_absolute():
+        logging_directory = Path(cfg["project"]["repo_path"]) / logging_directory
     if logging_cfg.get("use_date_subfolder", True):
         today_date = datetime.now().strftime(logging_cfg.get("date_format", "%Y-%m-%d"))
         logging_directory = logging_directory / today_date
@@ -223,7 +244,8 @@ def filter_and_sort_detections(detections, class_info):
 
 def global_filter_and_sort_detections(all_detections, class_info):
     filtered_detections = [
-        det for det in all_detections if det[3] >= class_info[det[4]][1]
+        det for det in all_detections
+        if det[3] >= class_info[det[4]][1] and class_info[det[4]][2] != -1
     ]
 
     return sorted(
@@ -233,6 +255,12 @@ def global_filter_and_sort_detections(all_detections, class_info):
 
 
 def plot_image_with_results(image, boxes, class_names, class_info, file_path):
+    """Save an annotated prediction image to ``file_path``."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+
     plotting_cfg = get_config()["plotting"]
     bbox_cfg = plotting_cfg["bbox"]
     label_cfg = plotting_cfg["label"]
@@ -277,17 +305,28 @@ def plot_image_with_results(image, boxes, class_names, class_info, file_path):
 
 
 def preprocess_image(img):
+    """Convert a supported 2-D or RGB image to a normalised uint8 image.
+
+    Two-dimensional images are used directly. Three-dimensional images must use
+    the configured ``first_channel_if_rgb`` mode, in which case channel zero is
+    selected. Values above the configured upper percentile are clipped before
+    min/max normalisation.
+    """
     preprocessing_cfg = get_config()["preprocessing"]
 
     input_mode = preprocessing_cfg["input_channel"].get("mode", "first_channel_if_rgb")
-    if len(img.shape) == 3 and input_mode == "first_channel_if_rgb":
+    if not isinstance(img, np.ndarray):
+        raise TypeError("Image preprocessing expects a numpy.ndarray")
+    if img.ndim == 3 and input_mode == "first_channel_if_rgb":
         timepoint_data = img[:, :, 0]
-    elif len(img.shape) == 2:
+    elif img.ndim == 2:
         timepoint_data = img
     else:
         raise ValueError(f"Unsupported image shape for preprocessing: {img.shape}")
 
     top_clip_percentile = float(preprocessing_cfg.get("top_clip_percentile", 0.01))
+    if not 0 <= top_clip_percentile < 100:
+        raise ValueError("preprocessing.top_clip_percentile must be in [0, 100)")
     threshold_value = np.percentile(timepoint_data, 100 - top_clip_percentile)
     timepoint_data_normalized = np.where(
         timepoint_data > threshold_value,
@@ -310,26 +349,96 @@ def preprocess_image(img):
 
 
 def split_image(img):
+    """Split a 2-D image into configured tiles and return each tile and offset."""
     tiling_cfg = get_config()["tiling"]
+    if not isinstance(img, np.ndarray) or img.ndim != 2:
+        raise ValueError("Image tiling expects a two-dimensional numpy.ndarray")
     if not tiling_cfg.get("enabled", True):
         return [(img, 0, 0)]
 
     height, width = img.shape
-    desired_im_size = int(tiling_cfg.get("tile_size_px", 640))
+    desired_im_size = _positive_integer(tiling_cfg.get("tile_size_px", 640), "tiling.tile_size_px")
+    overlap_px = _non_negative_integer(tiling_cfg.get("overlap_px", 0), "tiling.overlap_px")
+    if desired_im_size <= 0:
+        raise ValueError("tiling.tile_size_px must be a positive integer")
+    if overlap_px >= desired_im_size:
+        raise ValueError("tiling.overlap_px must be smaller than tiling.tile_size_px")
+    if height == 0 or width == 0:
+        raise ValueError("Image tiling does not support empty images")
+    stride = desired_im_size - overlap_px
+    x_offsets = _tile_offsets(width, desired_im_size, stride)
+    y_offsets = _tile_offsets(height, desired_im_size, stride)
     split_images = []
 
-    for row in range(math.ceil(height / desired_im_size)):
-        for col in range(math.ceil(width / desired_im_size)):
-            x1 = col * desired_im_size
-            y1 = row * desired_im_size
+    for y1 in y_offsets:
+        for x1 in x_offsets:
             x2 = min(x1 + desired_im_size, width)
             y2 = min(y1 + desired_im_size, height)
-            x1 = x2 - desired_im_size
-            y1 = y2 - desired_im_size
             split_img = img[y1:y2, x1:x2]
             split_images.append((split_img, x1, y1))
 
     return split_images
+
+
+def _positive_integer(value, name):
+    if isinstance(value, bool) or not isinstance(value, Real) or int(value) != value or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(value)
+
+
+def _non_negative_integer(value, name):
+    if isinstance(value, bool) or not isinstance(value, Real) or int(value) != value or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return int(value)
+
+
+def _tile_offsets(length, tile_size, stride):
+    if length <= tile_size:
+        return [0]
+    last_offset = length - tile_size
+    offsets = list(range(0, last_offset + 1, stride))
+    if offsets[-1] != last_offset:
+        offsets.append(last_offset)
+    return offsets
+
+
+def _detection_from_values(values):
+    return Detection(
+        class_id=int(values[0]),
+        x=float(values[1]),
+        y=float(values[2]),
+        width=float(values[3]),
+        height=float(values[4]),
+        confidence=float(values[5]),
+    )
+
+
+def deduplicate_detections(detections, tolerance_px):
+    """Keep the highest-confidence detection for overlapping same-class boxes."""
+    tolerance_px = _finite_number(tolerance_px, "tiling.deduplication_tolerance_px")
+    if tolerance_px < 0:
+        raise ValueError("tiling.deduplication_tolerance_px must be non-negative")
+
+    ordered = sorted(
+        (_detection_from_values(detection) for detection in detections),
+        key=lambda detection: (
+            detection.class_id,
+            -detection.confidence,
+            detection.centre_y,
+            detection.centre_x,
+        ),
+    )
+    unique = []
+    for detection in ordered:
+        is_duplicate = any(
+            detection.class_id == accepted.class_id
+            and math.hypot(detection.centre_x - accepted.centre_x, detection.centre_y - accepted.centre_y)
+            <= tolerance_px
+            for accepted in unique
+        )
+        if not is_duplicate:
+            unique.append(detection)
+    return [[d.class_id, d.x, d.y, d.width, d.height, d.confidence] for d in unique]
 
 
 def adjust_coordinates(detections, x_offset, y_offset):
@@ -347,18 +456,12 @@ def adjust_coordinates(detections, x_offset, y_offset):
 
 
 def run_model_inference(img, conf):
-    cfg = get_config()
-    backend = get_backend(cfg)
+    backend = get_backend(get_config())
     current_model = get_model()
 
     if backend == "ultralytics_yolo":
         results = current_model(img, conf=conf)
         return ultralytics_results_to_detections(results, 0, 0)
-    if backend == "rfdetr":
-        results = current_model.predict(img, threshold=conf)
-        return rfdetr_results_to_detections(results)
-    if backend == "torchscript":
-        return torchscript_results_to_detections(current_model, img, conf)
     raise ValueError(f"Unsupported model backend: {backend}")
 
 
@@ -368,73 +471,8 @@ def ultralytics_results_to_detections(results, x_offset, y_offset):
     return adjust_coordinates(results[0].boxes, x_offset, y_offset)
 
 
-def rfdetr_results_to_detections(results):
-    xyxy = getattr(results, "xyxy", None)
-    confidence = getattr(results, "confidence", None)
-    class_id = getattr(results, "class_id", None)
-
-    if xyxy is None and isinstance(results, dict):
-        xyxy = results.get("xyxy")
-        if xyxy is None:
-            xyxy = results.get("boxes")
-        confidence = results.get("confidence")
-        if confidence is None:
-            confidence = results.get("scores")
-        class_id = results.get("class_id")
-        if class_id is None:
-            class_id = results.get("labels")
-
-    if xyxy is None:
-        raise ValueError("RF-DETR results must provide xyxy/boxes, confidence/scores, and class_id/labels")
-
-    return xyxy_arrays_to_detections(xyxy, confidence, class_id)
-
-
-def torchscript_results_to_detections(current_model, img, conf):
-    import torch
-
-    input_tensor = torch.from_numpy(img).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-    with torch.no_grad():
-        outputs = current_model(input_tensor)
-
-    if isinstance(outputs, (list, tuple)):
-        outputs = outputs[0]
-
-    if isinstance(outputs, dict):
-        return xyxy_arrays_to_detections(outputs["boxes"], outputs["scores"], outputs["labels"], conf)
-
-    output_array = outputs.detach().cpu().numpy()
-    if output_array.ndim == 3:
-        output_array = output_array[0]
-    if output_array.shape[1] < 6:
-        raise ValueError("TorchScript tensor output must be Nx6: x1,y1,x2,y2,confidence,class_id")
-
-    return [
-        xyxy_to_detection(row[:4], row[4], row[5])
-        for row in output_array
-        if row[4] >= conf
-    ]
-
-
-def xyxy_arrays_to_detections(xyxy, confidence, class_id, conf_threshold=None):
-    xyxy = np.asarray(xyxy)
-    confidence = np.asarray(confidence)
-    class_id = np.asarray(class_id)
-
-    detections = []
-    for box, score, cls in zip(xyxy, confidence, class_id):
-        if conf_threshold is not None and score < conf_threshold:
-            continue
-        detections.append(xyxy_to_detection(box, score, cls))
-    return detections
-
-
-def xyxy_to_detection(box, score, cls):
-    x1, y1, x2, y2 = [float(value) for value in box]
-    return [int(cls), x1, y1, x2 - x1, y2 - y1, float(score)]
-
-
 def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=False):
+    """Preprocess an image, run inference, and return pixel-space detections."""
     cfg = get_config()
     if class_info is None:
         class_info = get_class_info(cfg["profile"])
@@ -460,6 +498,12 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
             detection[2] += y_offset
         results.extend(results_split)
 
+    tiling_cfg = cfg["tiling"]
+    results = deduplicate_detections(
+        results,
+        tiling_cfg.get("deduplication_tolerance_px", 1.0),
+    )
+
     if plot:
         if save_path is None:
             save_path = get_outimg_path()
@@ -480,65 +524,123 @@ def process_image_from_path(image_path, conf=None, save_path=None, class_info=No
     return process_image(img, conf, save_path, class_info, plot)
 
 
-def process_single_location(x, y, z, image, xy_pixel_spacing, z_spacing, x_stage_direction, y_stage_direction, z_stage_direction, LLSM, z_offset, class_info):
-    new_z = z + z_offset
-    if len(image.shape) == 3:
-        image = np.max(image, axis=0)
-
+def process_single_location(
+    position,
+    image,
+    class_info,
+    *,
+    xy_pixel_spacing_um,
+    z_offset_um,
+    coordinate_mode,
+    coordinate_converter,
+    x_stage_direction,
+    y_stage_direction,
+    legacy_llsm_y_inversion,
+):
+    """Run one overview image and convert its detections to capture targets."""
     height, width = image.shape
     plot_enabled = get_config()["plotting"].get("enabled", True) and is_logging_enabled()
     img_path = get_outimg_path() if plot_enabled else None
-
     class_names = {key: value[0] for key, value in class_info.items()}
-    results = process_image(
-        image,
-        None,
-        img_path,
-        class_info,
-        plot=plot_enabled,
-    )
+    results = process_image(image, None, img_path, class_info, plot=plot_enabled)
+    filtered_detections = filter_and_sort_detections(results, class_info)
 
-    filtered_sorted_detections = filter_and_sort_detections(results, class_info)
-
-    converted_results = []
-    for result in filtered_sorted_detections:
-        class_id, im_x, im_y, w, h, conf = result
-        class_name = class_names[class_id]
-        converted_results.append(
-            image_cordinates_to_physical(
-                x,
-                y,
-                im_x,
-                im_y,
-                width,
-                height,
-                new_z,
-                xy_pixel_spacing,
-                z_spacing,
-                x_stage_direction,
-                y_stage_direction,
-                z_stage_direction,
-                LLSM,
-                class_id,
-                conf,
-                class_name,
-            )
+    return [
+        _convert_detection(
+            position,
+            _detection_from_values(detection),
+            width,
+            height,
+            xy_pixel_spacing_um=xy_pixel_spacing_um,
+            z_offset_um=z_offset_um,
+            coordinate_mode=coordinate_mode,
+            coordinate_converter=coordinate_converter,
+            x_stage_direction=x_stage_direction,
+            y_stage_direction=y_stage_direction,
+            legacy_llsm_y_inversion=legacy_llsm_y_inversion,
+            class_name=class_names[int(detection[0])],
         )
+        for detection in filtered_detections
+    ]
 
-    return converted_results
+
+def _convert_detection(
+    position,
+    detection,
+    image_width_px,
+    image_height_px,
+    *,
+    xy_pixel_spacing_um,
+    z_offset_um,
+    coordinate_mode,
+    coordinate_converter,
+    x_stage_direction,
+    y_stage_direction,
+    legacy_llsm_y_inversion,
+    class_name,
+):
+    target_z = position.z + z_offset_um
+    if coordinate_mode == "pixel":
+        target_x, target_y = detection.centre_x, detection.centre_y
+    elif coordinate_mode == "stage":
+        # This preserves the legacy 3i stage-coordinate calculation.
+        x_offset = detection.x - image_width_px / 2
+        y_offset = detection.y - image_height_px / 2
+        adjusted_y_direction = y_stage_direction
+        if legacy_llsm_y_inversion:
+            adjusted_y_direction *= -1
+        target_x = position.x + x_offset * xy_pixel_spacing_um * x_stage_direction
+        target_y = position.y + y_offset * xy_pixel_spacing_um * adjusted_y_direction
+    else:
+        target_x, target_y, target_z = _run_coordinate_converter(
+            coordinate_converter,
+            stage_x=position.x,
+            stage_y=position.y,
+            stage_z=position.z,
+            detection_x_px=detection.centre_x,
+            detection_y_px=detection.centre_y,
+            image_width_px=image_width_px,
+            image_height_px=image_height_px,
+            xy_pixel_spacing_um=xy_pixel_spacing_um,
+            z_offset_um=z_offset_um,
+            class_id=detection.class_id,
+            confidence=detection.confidence,
+            class_name=class_name,
+        )
+    return [target_x, target_y, target_z, detection.confidence, detection.class_id, class_name]
+
+
+def _run_coordinate_converter(coordinate_converter, **kwargs):
+    converted = coordinate_converter(**kwargs)
+    try:
+        target_x, target_y, target_z = converted
+    except (TypeError, ValueError) as error:
+        raise ValueError("coordinate_converter must return exactly three values: (x, y, z)") from error
+    return (
+        _finite_number(target_x, "coordinate_converter x output"),
+        _finite_number(target_y, "coordinate_converter y output"),
+        _finite_number(target_z, "coordinate_converter z output"),
+    )
 
 
 def image_cordinates_to_physical(x, y, im_x, im_y, w, h, new_z, xy_pixel_spacing, z_spacing, x_stage_direction, y_stage_direction, z_stage_direction, LLSM, class_id, conf, class_name):
-    x_offset = im_x - w / 2
-    y_offset = im_y - h / 2
-
-    adjusted_x = x + x_offset * xy_pixel_spacing * x_stage_direction
-    adjusted_y_direction = y_stage_direction
-    if LLSM and get_config()["coordinate_conversion"]["llsm"].get("invert_y_stage_direction", True):
-        adjusted_y_direction *= -1
-    adjusted_y = y + y_offset * xy_pixel_spacing * adjusted_y_direction
-
-    return [adjusted_x, adjusted_y, new_z, conf, class_id, class_name]
+    """Legacy coordinate-conversion helper retained for existing integrations."""
+    position = CapturePosition(_finite_number(x, "x"), _finite_number(y, "y"), _finite_number(new_z, "new_z"))
+    detection = Detection(int(class_id), float(im_x), float(im_y), 0.0, 0.0, float(conf))
+    return _convert_detection(
+        position,
+        detection,
+        w,
+        h,
+        xy_pixel_spacing_um=_positive_number(xy_pixel_spacing, "xy_pixel_spacing"),
+        z_offset_um=0.0,
+        coordinate_mode="stage",
+        coordinate_converter=None,
+        x_stage_direction=_stage_direction(x_stage_direction, "x_stage_direction"),
+        y_stage_direction=_stage_direction(y_stage_direction, "y_stage_direction"),
+        legacy_llsm_y_inversion=bool(LLSM and get_config()["coordinate_conversion"]["llsm"].get("invert_y_stage_direction", True)),
+        class_name=class_name,
+    )
 
 
 def merge_close_coordinates(coordinates, tolerance):
@@ -553,23 +655,132 @@ def merge_close_coordinates(coordinates, tolerance):
     return unique_coords[:, 0], unique_coords[:, 1], unique_coords[:, 2], list(unique_coords[:, 5])
 
 
-def process_montage(X, Y, Z, image, xy_pixel_spacing, z_spacing, x_stage_direction, y_stage_direction, z_stage_direction, LLSM, z_offset, class_info):
+def _finite_number(value, name):
+    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value):
+        raise TypeError(f"{name} must be a finite number")
+    return float(value)
+
+
+def _positive_number(value, name):
+    numeric_value = _finite_number(value, name)
+    if numeric_value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return numeric_value
+
+
+def _stage_direction(value, name):
+    numeric_value = _finite_number(value, name)
+    if numeric_value not in {-1.0, 1.0}:
+        raise ValueError(f"{name} must be -1 or 1")
+    return int(numeric_value)
+
+
+def _capture_positions(stage_x, stage_y, stage_z):
+    scalar_inputs = [stage_x, stage_y, stage_z]
+    if all(isinstance(value, Real) and not isinstance(value, bool) for value in scalar_inputs):
+        return [
+            CapturePosition(
+                _finite_number(stage_x, "stage_x"),
+                _finite_number(stage_y, "stage_y"),
+                _finite_number(stage_z, "stage_z"),
+            )
+        ]
+
+    try:
+        axes = [np.asarray(axis, dtype=float) for axis in scalar_inputs]
+    except (TypeError, ValueError) as error:
+        raise TypeError("stage_x, stage_y, and stage_z must be numeric scalars or one-dimensional sequences") from error
+    if any(axis.ndim != 1 for axis in axes):
+        raise ValueError("stage_x, stage_y, and stage_z sequences must be one-dimensional")
+    if not axes[0].size or len({axis.size for axis in axes}) != 1:
+        raise ValueError("stage_x, stage_y, and stage_z must be non-empty sequences of equal length")
+    if not all(np.isfinite(axis).all() for axis in axes):
+        raise ValueError("stage coordinates must be finite")
+    return [CapturePosition(float(x), float(y), float(z)) for x, y, z in zip(*axes)]
+
+
+def _validate_image_stack(image, position_count):
+    if not isinstance(image, np.ndarray):
+        raise TypeError("image must be a numpy.ndarray shaped (height, width, position)")
+    if image.ndim != 3:
+        raise ValueError("image must have shape (height, width, position)")
+    if image.shape[0] == 0 or image.shape[1] == 0:
+        raise ValueError("image must have non-empty height and width")
+    if image.shape[2] != position_count:
+        raise ValueError("image position axis must match the number of stage positions")
+
+
+def _resolve_coordinate_mode(coordinate_mode, coordinate_converter):
+    valid_modes = {"pixel", "stage", "callable"}
+    if coordinate_mode not in valid_modes:
+        raise ValueError(f"coordinate_mode must be one of {sorted(valid_modes)}")
+    if coordinate_mode == "callable" and not callable(coordinate_converter):
+        raise TypeError("coordinate_converter must be callable when coordinate_mode is 'callable'")
+    if coordinate_mode != "callable" and coordinate_converter is not None:
+        raise ValueError("coordinate_converter can only be used when coordinate_mode is 'callable'")
+
+
+def _capture_result(positions, results, profile_config):
+    new_x, new_y, new_z, class_list = results
+    count = len(new_x)
+    if count == 0:
+        no_detection = get_config()["no_detection"]
+        mode = no_detection.get("mode", "empty_3i_capture_script")
+        if mode == "end_workflow":
+            return 0, np.array([]), np.array([]), np.array([]), [], [], []
+        if mode == "empty_3i_capture_script":
+            first_position = positions[0]
+            return (
+                1,
+                np.array([first_position.x]),
+                np.array([first_position.y]),
+                np.array([first_position.z]),
+                [no_detection.get("empty_3i_capture_script", "donothing")],
+                ["nothing"],
+                ["nothing"],
+            )
+        raise ValueError(f"Unsupported no_detection mode: {mode}")
+
+    scripts = [profile_config["highres_script"] for _ in range(count)]
+    names = [
+        profile_config["name_template"].format(
+            class_name=class_list[index],
+            x=new_x[index],
+            y=new_y[index],
+            z=new_z[index],
+        )
+        for index in range(count)
+    ]
+    comments = [profile_config["highres_comment"] for _ in range(count)]
+    return count, new_x, new_y, new_z, scripts, names, comments
+
+
+def process_montage(
+    positions,
+    image,
+    class_info,
+    *,
+    xy_pixel_spacing_um,
+    z_offset_um,
+    coordinate_mode,
+    coordinate_converter,
+    x_stage_direction,
+    y_stage_direction,
+    legacy_llsm_y_inversion,
+):
     results = []
-    image_array = np.array(image)
-    for i, (x, y, z) in enumerate(zip(X, Y, Z)):
+    for i, position in enumerate(positions):
         tmp = process_single_location(
-            x,
-            y,
-            z,
-            image_array[:, :, i],
-            xy_pixel_spacing,
-            z_spacing,
-            x_stage_direction,
-            y_stage_direction,
-            z_stage_direction,
-            LLSM,
-            z_offset,
+            position,
+            image[:, :, i],
             class_info,
+            xy_pixel_spacing_um=xy_pixel_spacing_um,
+            z_offset_um=z_offset_um,
+            coordinate_mode=coordinate_mode,
+            coordinate_converter=coordinate_converter,
+            x_stage_direction=x_stage_direction,
+            y_stage_direction=y_stage_direction,
+            legacy_llsm_y_inversion=legacy_llsm_y_inversion,
         )
         if tmp:
             for item in tmp:
@@ -577,83 +788,100 @@ def process_montage(X, Y, Z, image, xy_pixel_spacing, z_spacing, x_stage_directi
 
     sorted_results = global_filter_and_sort_detections(results, class_info)
 
-    if len(results) == 0:
+    if not sorted_results:
         return np.array([]), np.array([]), np.array([]), []
+
+    if coordinate_mode == "pixel":
+        final_result = np.array(sorted_results, dtype=object)
+        return final_result[:, 0], final_result[:, 1], final_result[:, 2], list(final_result[:, 5])
 
     final_result = np.array(sorted_results, dtype=object)
     tolerance = get_config()["coordinate_conversion"].get("merge_tolerance_um", 20)
-    new_X, new_Y, new_Z, new_class_names = merge_close_coordinates(final_result, tolerance)
-    return new_X, new_Y, new_Z, new_class_names
+    new_x, new_y, new_z, class_names = merge_close_coordinates(final_result, tolerance)
+    return new_x, new_y, new_z, class_names
 
 
-def get_target_location(X, Y, Z, image, xy_pixel_spacing, z_spacing, x_stage_direction, y_stage_direction, z_stage_direction, LLSM=False, z_offset=None):
+def get_target_locations(
+    *,
+    stage_x,
+    stage_y,
+    stage_z,
+    image,
+    xy_pixel_spacing_um=None,
+    x_stage_direction=1,
+    y_stage_direction=1,
+    z_offset_um=None,
+    coordinate_mode=None,
+    coordinate_converter=None,
+    _legacy_llsm_y_inversion=False,
+):
+    """Return capture targets using named parameters and explicit coordinate mode.
+
+    ``image`` must have shape ``(height, width, position)``. ``coordinate_mode``
+    is ``stage`` (the configured default), ``pixel``, or ``callable``. Callable
+    converters receive keyword arguments documented in the README and return
+    ``(x, y, z)``. The return value matches :func:`get_target_location`.
+    """
     global experiment_path
 
     cfg = get_config()
-    if z_offset is None:
-        z_offset = cfg["coordinate_conversion"].get("default_z_offset_um", 0)
+    positions = _capture_positions(stage_x, stage_y, stage_z)
+    _validate_image_stack(image, len(positions))
+    mode = coordinate_mode or cfg["coordinate_conversion"].get("mode", "stage")
+    _resolve_coordinate_mode(mode, coordinate_converter)
+    offset = cfg["coordinate_conversion"].get("default_z_offset_um", 0) if z_offset_um is None else z_offset_um
+    offset = _finite_number(offset, "z_offset_um")
+    x_direction = _stage_direction(x_stage_direction, "x_stage_direction")
+    y_direction = _stage_direction(y_stage_direction, "y_stage_direction")
 
-    if type(X) == float:
-        X = [X]
-        Y = [Y]
-        Z = [Z]
+    if mode == "stage":
+        spacing = _positive_number(xy_pixel_spacing_um, "xy_pixel_spacing_um")
+    elif mode == "callable":
+        spacing = _finite_number(xy_pixel_spacing_um, "xy_pixel_spacing_um")
+    else:
+        spacing = None
 
     profile_config = cfg["profile"]
     class_info = get_class_info(profile_config)
-
     if is_logging_enabled():
         logging_directory = get_logging_directory()
         logging_directory.mkdir(parents=True, exist_ok=True)
         create_exp_folder(logging_directory)
 
-    new_X, new_Y, new_Z, class_list = process_montage(
-        X,
-        Y,
-        Z,
+    montage_results = process_montage(
+        positions,
         image,
-        xy_pixel_spacing,
-        z_spacing,
-        x_stage_direction,
-        y_stage_direction,
-        z_stage_direction,
-        LLSM,
-        z_offset,
         class_info,
+        xy_pixel_spacing_um=spacing,
+        z_offset_um=offset,
+        coordinate_mode=mode,
+        coordinate_converter=coordinate_converter,
+        x_stage_direction=x_direction,
+        y_stage_direction=y_direction,
+        legacy_llsm_y_inversion=_legacy_llsm_y_inversion,
     )
+    return _capture_result(positions, montage_results, profile_config)
 
-    N = len(new_X)
 
-    if N == 0:
-        no_detection_mode = cfg["no_detection"].get("mode", "empty_3i_capture_script")
-        if no_detection_mode == "end_workflow":
-            N = 0
-            new_X = np.array([])
-            new_Y = np.array([])
-            new_Z = np.array([])
-            script_list = []
-            name_list = []
-            comment_list = []
-        elif no_detection_mode == "empty_3i_capture_script":
-            N = 1
-            new_X = np.array([X[0]])
-            new_Y = np.array([Y[0]])
-            new_Z = np.array([Z[0]])
-            script_list = [cfg["no_detection"].get("empty_3i_capture_script", "donothing")]
-            name_list = ["nothing"]
-            comment_list = ["nothing"]
-        else:
-            raise ValueError(f"Unsupported no_detection mode: {no_detection_mode}")
-    else:
-        script_list = [profile_config["highres_script"] for i in range(N)]
-        name_list = [
-            profile_config["name_template"].format(
-                class_name=class_list[i],
-                x=new_X[i],
-                y=new_Y[i],
-                z=new_Z[i],
-            )
-            for i in range(N)
-        ]
-        comment_list = [profile_config["highres_comment"] for i in range(N)]
+def get_target_location(X, Y, Z, image, xy_pixel_spacing, z_spacing, x_stage_direction, y_stage_direction, z_stage_direction, LLSM=False, z_offset=None):
+    """Legacy positional wrapper for :func:`get_target_locations`.
 
-    return N, new_X, new_Y, new_Z, script_list, name_list, comment_list
+    ``z_spacing`` and ``z_stage_direction`` are accepted for compatibility with
+    existing microscope scripts; the current two-dimensional target conversion
+    does not use them.
+    """
+    _finite_number(z_spacing, "z_spacing")
+    _stage_direction(z_stage_direction, "z_stage_direction")
+    llsm_inversion = bool(LLSM and get_config()["coordinate_conversion"]["llsm"].get("invert_y_stage_direction", True))
+    return get_target_locations(
+        stage_x=X,
+        stage_y=Y,
+        stage_z=Z,
+        image=image,
+        xy_pixel_spacing_um=xy_pixel_spacing,
+        x_stage_direction=x_stage_direction,
+        y_stage_direction=y_stage_direction,
+        z_offset_um=z_offset,
+        coordinate_mode="stage",
+        _legacy_llsm_y_inversion=llsm_inversion,
+    )

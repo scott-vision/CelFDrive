@@ -1,8 +1,8 @@
 schema_version: 1
 project:
-  repo_path: C:/path/to/CelFDrive
+  repo_path: .
 model:
-  weights_path: ${project.repo_path}/models/SiRDNA/20240514_Polled_0.0_4/weights/best.pt
+  weights_path: Models/Trained/weights/best.pt
   backend: ultralytics_yolo
   suppress_stdout: true
 logging:
@@ -27,6 +27,7 @@ tiling:
   tile_size_px: 640
   edge_mode: shift_last_tile_inside_image
   overlap_px: 0
+  deduplication_tolerance_px: 1.0
 plotting:
   enabled: true
   cmap: gray
@@ -39,6 +40,7 @@ plotting:
     background_color: black
     background_alpha: 0.5
 coordinate_conversion:
+  mode: stage
   default_z_offset_um: 0.0
   merge_tolerance_um: 20.0
   stage_direction:

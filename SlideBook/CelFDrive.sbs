@@ -1,0 +1,4 @@
+CreateProjectionImage(<current image>, Operation = Maximum, Axis = Z, AutoScaleSum = false, ScaleFactor =1.0)
+ChangeObjective(Objective = "20x Air")
+RunMatlabHierarchicalCaptureFunction("CelFDrive- Position 1 [16].Project Maximum Z", Function = "find_locations_of_interest_from_montage")
+Run6DCapture()

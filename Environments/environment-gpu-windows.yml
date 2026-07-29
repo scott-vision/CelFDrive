@@ -1,15 +1,8 @@
-name: CellToolsGPU
+name: celfdrive-windows
 channels:
-  - pytorch
-  - nvidia
   - conda-forge
-  - defaults
 dependencies:
-  - python=3.9  # This version is compatible with many libraries and frameworks.
-  - cudatoolkit=11.3  # Choose a version known to be compatible with the PyTorch version you plan to install.
-  - pytorch
-  - torchvision
-  - torchaudio
+  - python=3.11
   - pip
   - numpy
   - scipy
@@ -20,7 +13,12 @@ dependencies:
   - seaborn
   - tqdm
   - pyyaml
+  - pytest
   - pip:
+      # Install a CUDA-enabled PyTorch build separately when required; see README.
+      - torch
+      - torchvision
+      - torchaudio
       - dill==0.3.8
       - opencv-contrib-python
       - networkx==3.2.1
@@ -29,6 +27,4 @@ dependencies:
       - fsspec==2024.2.0
       - openpyxl
       - ultralytics
-      - rfdetr
       - jupyter
-prefix: E:\anaconda3\envs\CellToolsGPU
