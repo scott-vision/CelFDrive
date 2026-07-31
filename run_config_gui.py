@@ -16,6 +16,36 @@ REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = REPO_ROOT / "celfdrive_predict.yaml"
 CONFIG_DIR = REPO_ROOT / "Configs"
 CONFIG_PATH = DEFAULT_CONFIG_PATH
+SLIDEBOOK_SCRIPT_PATH = REPO_ROOT / "SlideBook" / "CelFDrive.sbs"
+
+
+def render_slidebook_script(config):
+    """Render the direct-Python SlideBook macro from a CelFDrive config."""
+    slidebook = config["slidebook"]
+    environment = _slidebook_string(slidebook["python_environment"], "slidebook.python_environment")
+    objective = _slidebook_string(slidebook["highres_objective"], "slidebook.highres_objective")
+    repo_path = Path(config["project"]["repo_path"])
+    if not repo_path.is_absolute():
+        repo_path = REPO_ROOT / repo_path
+    python_path = repo_path.resolve().as_posix()
+    return "\n".join(
+        [
+            f'Python_SetEnvironment(Environment = "{environment}", UseThread = true)',
+            'Python_RunCommand(Command="import sys")',
+            f'Python_RunCommand(Command="sys.path.insert(0, r\'{python_path}\')")',
+            'Python_RunHierarchicalCaptureFunction(<current image>, Function = "find_locations_of_interest_montage.py")',
+            f'ChangeObjective(Objective = "{objective}")',
+            "Run6DCapture()",
+            "",
+        ]
+    )
+
+
+def _slidebook_string(value, name):
+    _non_empty_string(value, name)
+    if '"' in value or "\n" in value or "\r" in value:
+        raise ValueError(f"{name} cannot contain quotes or line breaks")
+    return value
 
 
 def validate_prediction_config(config):
@@ -92,6 +122,15 @@ def validate_prediction_config(config):
         raise ValueError("coordinate_conversion.stage_direction must contain x, y, and z values of -1 or 1")
     llsm = _mapping(coordinates.get("llsm"), "coordinate_conversion.llsm")
     _boolean(llsm.get("invert_y_stage_direction"), "coordinate_conversion.llsm.invert_y_stage_direction")
+
+    slidebook = _mapping(config.get("slidebook"), "slidebook")
+    _slidebook_string(slidebook.get("python_environment"), "slidebook.python_environment")
+    _slidebook_string(slidebook.get("highres_objective"), "slidebook.highres_objective")
+    objective_offset = _mapping(slidebook.get("objective_offset_um"), "slidebook.objective_offset_um")
+    if set(objective_offset) != {"x", "y", "z"}:
+        raise ValueError("slidebook.objective_offset_um must contain x, y, and z values")
+    for axis, value in objective_offset.items():
+        _finite_float(value, f"slidebook.objective_offset_um.{axis}")
 
     no_detection = _mapping(config.get("no_detection"), "no_detection")
     if no_detection.get("mode") not in {"end_workflow", "empty_3i_capture_script"}:
@@ -392,6 +431,10 @@ class ConfigEditor:
             no_detection["empty_3i_capture_script"] = no_detection.get("script", "donothing")
         for key in ["n_returned_locations", "script", "name", "comment", "return_original_first_position"]:
             no_detection.pop(key, None)
+        slidebook = config.setdefault("slidebook", {})
+        slidebook.setdefault("python_environment", "celfdrive-windows")
+        slidebook.setdefault("highres_objective", "20x Air")
+        slidebook.setdefault("objective_offset_um", {"x": 0.0, "y": 0.0, "z": 0.0})
 
     def build_ui(self):
         """Create the notebook tabs and bottom action bar.
@@ -644,6 +687,11 @@ class ConfigEditor:
         with open(path, "w", encoding="utf-8") as file:
             yaml.safe_dump(self.config, file, sort_keys=False)
 
+    def write_slidebook_script(self):
+        """Write the direct-Python SlideBook macro from the current config."""
+        validate_prediction_config(self.config)
+        SLIDEBOOK_SCRIPT_PATH.write_text(render_slidebook_script(self.config), encoding="utf-8")
+
     def save_as_config(self):
         """Save the current form to a new editable config in ``Configs``.
 
@@ -676,6 +724,7 @@ class ConfigEditor:
 
         self.config_path = selected_path
         self.write_config(self.config_path)
+        self.write_slidebook_script()
         self.rebuild_ui()
         self.status_var.set(f"Saved {self.config_path}")
 
@@ -697,6 +746,7 @@ class ConfigEditor:
                 self.apply_vars_to_config()
                 self.write_config(self.config_path)
             self.write_config(DEFAULT_CONFIG_PATH)
+            self.write_slidebook_script()
         except Exception as exc:
             messagebox.showerror("Set default failed", str(exc))
             return
@@ -829,6 +879,20 @@ class ConfigEditor:
         self.add_field(conversion, 4, "Stage direction y", ["coordinate_conversion", "stage_direction", "y"], int)
         self.add_field(conversion, 5, "Stage direction z", ["coordinate_conversion", "stage_direction", "z"], int)
         self.add_field(conversion, 6, "LLSM mode: invert Y stage direction", ["coordinate_conversion", "llsm", "invert_y_stage_direction"], bool)
+        self.add_field(conversion, 7, "SlideBook objective X offset um", ["slidebook", "objective_offset_um", "x"], float)
+        self.add_field(conversion, 8, "SlideBook objective Y offset um", ["slidebook", "objective_offset_um", "y"], float)
+        self.add_field(conversion, 9, "SlideBook objective Z offset um", ["slidebook", "objective_offset_um", "z"], float)
+
+        slidebook = self.add_section(parent, "SlideBook Python Macro", 2)
+        self.add_hint(
+            slidebook,
+            0,
+            "Saving writes SlideBook/CelFDrive.sbs from these settings. Copy that generated file and "
+            "find_locations_of_interest_montage.py to SlideBook's scripts folder.",
+            columnspan=3,
+        )
+        self.add_field(slidebook, 1, "Registered Python environment", ["slidebook", "python_environment"])
+        self.add_field(slidebook, 2, "High-resolution objective", ["slidebook", "highres_objective"])
 
         no_detection = self.add_section(parent, "No Detection", 1)
         mode_selector = self.add_dropdown(
@@ -1077,6 +1141,7 @@ class ConfigEditor:
         try:
             self.apply_vars_to_config()
             self.write_config(self.config_path)
+            self.write_slidebook_script()
         except Exception as exc:
             messagebox.showerror("Save failed", str(exc))
             return

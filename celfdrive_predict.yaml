@@ -49,6 +49,14 @@ coordinate_conversion:
     z: 1
   llsm:
     invert_y_stage_direction: true
+slidebook:
+  python_environment: celfdrive-windows
+  highres_objective: 20x Air
+  # Measured high-resolution-objective minus prescan-objective stage offsets.
+  objective_offset_um:
+    x: 0.0
+    y: 0.0
+    z: 0.0
 no_detection:
   mode: empty_3i_capture_script
   empty_3i_capture_script: donothing

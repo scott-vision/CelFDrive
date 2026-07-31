@@ -101,6 +101,8 @@ def migrate_predict_config(raw_config):
         no_detection.pop(key, None)
     coordinate_conversion = raw_config.setdefault("coordinate_conversion", {})
     coordinate_conversion.setdefault("mode", "stage")
+    slidebook = raw_config.setdefault("slidebook", {})
+    slidebook.setdefault("objective_offset_um", {"x": 0.0, "y": 0.0, "z": 0.0})
     tiling = raw_config.setdefault("tiling", {})
     tiling.setdefault("overlap_px", 0)
     tiling.setdefault("deduplication_tolerance_px", 1.0)

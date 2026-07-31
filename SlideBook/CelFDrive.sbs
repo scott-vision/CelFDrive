@@ -1,4 +1,6 @@
-CreateProjectionImage(<current image>, Operation = Maximum, Axis = Z, AutoScaleSum = false, ScaleFactor =1.0)
+Python_SetEnvironment(Environment = "celfdrive-windows", UseThread = true)
+Python_RunCommand(Command="import sys")
+Python_RunCommand(Command="sys.path.insert(0, r'C:/path/to/CelFDrive')")
+Python_RunHierarchicalCaptureFunction(<current image>, Function = "find_locations_of_interest_montage.py")
 ChangeObjective(Objective = "20x Air")
-RunMatlabHierarchicalCaptureFunction("CelFDrive- Position 1 [16].Project Maximum Z", Function = "find_locations_of_interest_from_montage")
 Run6DCapture()

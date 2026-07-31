@@ -113,7 +113,7 @@ Set the phase names in `run_selector.py` and the dataset/user values in `run_con
 
 ## Microscope integration and limitations
 
-CelFDrive is designed for workflows that can call Python and consume returned target coordinates. The repository includes a SlideBook starter script and [setup guide](docs/slidebook-capture-script.md) for the current 3i-oriented workflow. Adaptations to other systems must provide their own coordinate convention, capture command integration, and hardware safety checks.
+CelFDrive's current 3i-oriented SlideBook workflow invokes Python directly through SlideBook's Python hierarchical-capture support; it does not require MATLAB. The supplied bridge accepts a raw montage, converts SlideBook's image-axis order, and returns capture targets. Follow the [SlideBook direct-Python setup guide](docs/slidebook-capture-script.md), including registration of the Conda environment in SlideBook and microscope-specific objective-offset validation. Adaptations to other systems must provide their own coordinate convention, capture command integration, and hardware safety checks.
 
 Only the bundled Ultralytics YOLO workflow is supported and covered by the smoke test.
 

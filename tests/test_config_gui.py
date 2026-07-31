@@ -63,6 +63,11 @@ def valid_config():
             "stage_direction": {"x": 1, "y": 1, "z": 1},
             "llsm": {"invert_y_stage_direction": True},
         },
+        "slidebook": {
+            "python_environment": "celfdrive-windows",
+            "highres_objective": "20x Air",
+            "objective_offset_um": {"x": 0.0, "y": 0.0, "z": 0.0},
+        },
         "no_detection": {
             "mode": "empty_3i_capture_script",
             "empty_3i_capture_script": "donothing",
@@ -109,6 +114,8 @@ def test_validate_prediction_config_accepts_a_valid_postscan_profile():
         (lambda config: config["tiling"].update({"overlap_px": 640}), "overlap_px"),
         (lambda config: config["coordinate_conversion"].update({"mode": "callable"}), "API-only"),
         (lambda config: config["coordinate_conversion"].update({"stage_direction": {"x": 1, "y": 1}}), "x, y, and z"),
+        (lambda config: config["slidebook"].update({"objective_offset_um": {"x": 1, "y": 1}}), "x, y, and z"),
+        (lambda config: config["slidebook"].update({"python_environment": "bad\"name"}), "quotes"),
         (lambda config: config["profile"].update({"name_template": "{unknown}"}), "may only use"),
     ],
 )
