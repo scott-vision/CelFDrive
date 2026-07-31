@@ -65,6 +65,7 @@ def valid_config():
         },
         "slidebook": {
             "python_environment": "celfdrive-windows",
+            "pre_callback_objective": "",
             "highres_objective": "20x Air",
             "objective_offset_um": {"x": 0.0, "y": 0.0, "z": 0.0},
         },

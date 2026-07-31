@@ -23,22 +23,30 @@ def render_slidebook_script(config):
     """Render the direct-Python SlideBook macro from a CelFDrive config."""
     slidebook = config["slidebook"]
     environment = _slidebook_string(slidebook["python_environment"], "slidebook.python_environment")
+    callback_objective = _optional_slidebook_string(
+        slidebook["pre_callback_objective"], "slidebook.pre_callback_objective"
+    )
     objective = _slidebook_string(slidebook["highres_objective"], "slidebook.highres_objective")
     repo_path = Path(config["project"]["repo_path"])
     if not repo_path.is_absolute():
         repo_path = REPO_ROOT / repo_path
     python_path = repo_path.resolve().as_posix()
-    return "\n".join(
+    commands = [
+        f'Python_SetEnvironment(Environment = "{environment}", UseThread = true)',
+        'Python_RunCommand(Command="import sys")',
+        f'Python_RunCommand(Command="sys.path.insert(0, r\'{python_path}\')")',
+    ]
+    if callback_objective:
+        commands.append(f'ChangeObjective(Objective = "{callback_objective}")')
+    commands.extend(
         [
-            f'Python_SetEnvironment(Environment = "{environment}", UseThread = true)',
-            'Python_RunCommand(Command="import sys")',
-            f'Python_RunCommand(Command="sys.path.insert(0, r\'{python_path}\')")',
             'Python_RunHierarchicalCaptureFunction(<current image>, Function = "find_locations_of_interest_montage.py")',
             f'ChangeObjective(Objective = "{objective}")',
             "Run6DCapture()",
             "",
         ]
     )
+    return "\n".join(commands)
 
 
 def _slidebook_string(value, name):
@@ -46,6 +54,14 @@ def _slidebook_string(value, name):
     if '"' in value or "\n" in value or "\r" in value:
         raise ValueError(f"{name} cannot contain quotes or line breaks")
     return value
+
+
+def _optional_slidebook_string(value, name):
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a string")
+    if not value:
+        return ""
+    return _slidebook_string(value, name)
 
 
 def validate_prediction_config(config):
@@ -125,6 +141,7 @@ def validate_prediction_config(config):
 
     slidebook = _mapping(config.get("slidebook"), "slidebook")
     _slidebook_string(slidebook.get("python_environment"), "slidebook.python_environment")
+    _optional_slidebook_string(slidebook.get("pre_callback_objective"), "slidebook.pre_callback_objective")
     _slidebook_string(slidebook.get("highres_objective"), "slidebook.highres_objective")
     objective_offset = _mapping(slidebook.get("objective_offset_um"), "slidebook.objective_offset_um")
     if set(objective_offset) != {"x", "y", "z"}:
@@ -433,6 +450,7 @@ class ConfigEditor:
             no_detection.pop(key, None)
         slidebook = config.setdefault("slidebook", {})
         slidebook.setdefault("python_environment", "celfdrive-windows")
+        slidebook.setdefault("pre_callback_objective", "")
         slidebook.setdefault("highres_objective", "20x Air")
         slidebook.setdefault("objective_offset_um", {"x": 0.0, "y": 0.0, "z": 0.0})
 
@@ -892,7 +910,13 @@ class ConfigEditor:
             columnspan=3,
         )
         self.add_field(slidebook, 1, "Registered Python environment", ["slidebook", "python_environment"])
-        self.add_field(slidebook, 2, "High-resolution objective", ["slidebook", "highres_objective"])
+        self.add_field(
+            slidebook,
+            2,
+            "Objective before Python callback (optional)",
+            ["slidebook", "pre_callback_objective"],
+        )
+        self.add_field(slidebook, 3, "High-resolution objective", ["slidebook", "highres_objective"])
 
         no_detection = self.add_section(parent, "No Detection", 1)
         mode_selector = self.add_dropdown(

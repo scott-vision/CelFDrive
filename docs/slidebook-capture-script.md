@@ -32,8 +32,10 @@ runs the returned 6D capture. It does not use MATLAB.
    choose **Open Scripts Folder** to locate it.
 2. Run `python run_config_gui.py`. In **Coordinates > SlideBook Python Macro**,
    enter the environment name registered in SlideBook and the high-resolution
-   objective. **Save** generates `SlideBook/CelFDrive.sbs` with that environment,
-   the configured CelFDrive project root, and the objective name.
+   objective. Optionally enter **Objective before Python callback** to add a
+   `ChangeObjective(...)` command immediately before target finding. **Save**
+   generates `SlideBook/CelFDrive.sbs` with those settings and the configured
+   CelFDrive project root.
 3. Copy the generated `CelFDrive.sbs` into SlideBook's scripts folder and
    restart SlideBook so it discovers the updated script. The Python bridge
    imports `predict` from the configured checkout; do not add a MATLAB path.

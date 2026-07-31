@@ -8,6 +8,7 @@ def test_render_slidebook_script_uses_the_configured_environment_root_and_object
     config = valid_config()
     config["project"]["repo_path"] = "microscope/CelFDrive"
     config["slidebook"]["python_environment"] = "SlideBookPython"
+    config["slidebook"]["pre_callback_objective"] = "20x Air"
     config["slidebook"]["highres_objective"] = "63x Water"
     monkeypatch.setattr("run_config_gui.REPO_ROOT", tmp_path)
 
@@ -17,3 +18,4 @@ def test_render_slidebook_script_uses_the_configured_environment_root_and_object
     assert "sys.path.insert(0, r'" + (tmp_path / "microscope" / "CelFDrive").as_posix() + "')" in script
     assert 'ChangeObjective(Objective = "63x Water")' in script
     assert "Python_RunHierarchicalCaptureFunction" in script
+    assert script.index('ChangeObjective(Objective = "20x Air")') < script.index("Python_RunHierarchicalCaptureFunction")
