@@ -51,7 +51,7 @@ coordinate_conversion:
     invert_y_stage_direction: true
 slidebook:
   python_environment: celfdrive-windows
-  pre_callback_objective: ''
+  objective_before_target_search: ''
   highres_objective: 20x Air
   # Measured high-resolution-objective minus prescan-objective stage offsets.
   objective_offset_um:

@@ -8,7 +8,7 @@ def test_render_slidebook_script_uses_the_configured_environment_root_and_object
     config = valid_config()
     config["project"]["repo_path"] = "microscope/CelFDrive"
     config["slidebook"]["python_environment"] = "SlideBookPython"
-    config["slidebook"]["pre_callback_objective"] = "20x Air"
+    config["slidebook"]["objective_before_target_search"] = "20x Air"
     config["slidebook"]["highres_objective"] = "63x Water"
     monkeypatch.setattr("run_config_gui.REPO_ROOT", tmp_path)
 

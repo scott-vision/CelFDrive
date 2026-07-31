@@ -23,8 +23,8 @@ def render_slidebook_script(config):
     """Render the direct-Python SlideBook macro from a CelFDrive config."""
     slidebook = config["slidebook"]
     environment = _slidebook_string(slidebook["python_environment"], "slidebook.python_environment")
-    callback_objective = _optional_slidebook_string(
-        slidebook["pre_callback_objective"], "slidebook.pre_callback_objective"
+    search_objective = _optional_slidebook_string(
+        slidebook["objective_before_target_search"], "slidebook.objective_before_target_search"
     )
     objective = _slidebook_string(slidebook["highres_objective"], "slidebook.highres_objective")
     repo_path = Path(config["project"]["repo_path"])
@@ -36,8 +36,8 @@ def render_slidebook_script(config):
         'Python_RunCommand(Command="import sys")',
         f'Python_RunCommand(Command="sys.path.insert(0, r\'{python_path}\')")',
     ]
-    if callback_objective:
-        commands.append(f'ChangeObjective(Objective = "{callback_objective}")')
+    if search_objective:
+        commands.append(f'ChangeObjective(Objective = "{search_objective}")')
     commands.extend(
         [
             'Python_RunHierarchicalCaptureFunction(<current image>, Function = "find_locations_of_interest_montage.py")',
@@ -141,7 +141,9 @@ def validate_prediction_config(config):
 
     slidebook = _mapping(config.get("slidebook"), "slidebook")
     _slidebook_string(slidebook.get("python_environment"), "slidebook.python_environment")
-    _optional_slidebook_string(slidebook.get("pre_callback_objective"), "slidebook.pre_callback_objective")
+    _optional_slidebook_string(
+        slidebook.get("objective_before_target_search"), "slidebook.objective_before_target_search"
+    )
     _slidebook_string(slidebook.get("highres_objective"), "slidebook.highres_objective")
     objective_offset = _mapping(slidebook.get("objective_offset_um"), "slidebook.objective_offset_um")
     if set(objective_offset) != {"x", "y", "z"}:
@@ -450,7 +452,8 @@ class ConfigEditor:
             no_detection.pop(key, None)
         slidebook = config.setdefault("slidebook", {})
         slidebook.setdefault("python_environment", "celfdrive-windows")
-        slidebook.setdefault("pre_callback_objective", "")
+        if "objective_before_target_search" not in slidebook:
+            slidebook["objective_before_target_search"] = slidebook.pop("pre_callback_objective", "")
         slidebook.setdefault("highres_objective", "20x Air")
         slidebook.setdefault("objective_offset_um", {"x": 0.0, "y": 0.0, "z": 0.0})
 
@@ -913,8 +916,8 @@ class ConfigEditor:
         self.add_field(
             slidebook,
             2,
-            "Objective before Python callback (optional)",
-            ["slidebook", "pre_callback_objective"],
+            "Objective before target search (optional)",
+            ["slidebook", "objective_before_target_search"],
         )
         self.add_field(slidebook, 3, "High-resolution objective", ["slidebook", "highres_objective"])
 

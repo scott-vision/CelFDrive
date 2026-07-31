@@ -21,21 +21,6 @@ def _to_celfdrive_montage(raw_image):
     return np.moveaxis(image, 0, -1)
 
 
-def _apply_objective_offset(targets):
-    """Apply the configured high-resolution-objective stage calibration."""
-    count, target_x, target_y, target_z, scripts, names, comments = targets
-    offset = predict.get_config()["slidebook"]["objective_offset_um"]
-    return (
-        count,
-        np.asarray(target_x, dtype=float) + float(offset["x"]),
-        np.asarray(target_y, dtype=float) + float(offset["y"]),
-        np.asarray(target_z, dtype=float) + float(offset["z"]),
-        scripts,
-        names,
-        comments,
-    )
-
-
 def find_locations_of_interest_montage(
     image,
     stage_x,
@@ -51,7 +36,7 @@ def find_locations_of_interest_montage(
     name,
     comments,
 ):
-    """Return CelFDrive targets for a raw SlideBook montage callback.
+    """Return CelFDrive targets for a raw SlideBook montage.
 
     ``z_spacing_um``, ``z_stage_direction``, ``dims``, ``channels``, ``name``,
     and ``comments`` are supplied by SlideBook but are not used by the current
@@ -67,4 +52,14 @@ def find_locations_of_interest_montage(
         x_stage_direction=x_stage_direction,
         y_stage_direction=y_stage_direction,
     )
-    return _apply_objective_offset(targets)
+    count, target_x, target_y, target_z, scripts, names, comments = targets
+    objective_offset = predict.get_config()["slidebook"]["objective_offset_um"]
+    return (
+        count,
+        np.asarray(target_x, dtype=float) + float(objective_offset["x"]),
+        np.asarray(target_y, dtype=float) + float(objective_offset["y"]),
+        np.asarray(target_z, dtype=float) + float(objective_offset["z"]),
+        scripts,
+        names,
+        comments,
+    )

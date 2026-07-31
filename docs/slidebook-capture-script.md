@@ -32,7 +32,7 @@ runs the returned 6D capture. It does not use MATLAB.
    choose **Open Scripts Folder** to locate it.
 2. Run `python run_config_gui.py`. In **Coordinates > SlideBook Python Macro**,
    enter the environment name registered in SlideBook and the high-resolution
-   objective. Optionally enter **Objective before Python callback** to add a
+   objective. Optionally enter **Objective before target search** to add a
    `ChangeObjective(...)` command immediately before target finding. **Save**
    generates `SlideBook/CelFDrive.sbs` with those settings and the configured
    CelFDrive project root.
@@ -41,7 +41,7 @@ runs the returned 6D capture. It does not use MATLAB.
    imports `predict` from the configured checkout; do not add a MATLAB path.
 
 The supplied macro intentionally does not create a maximum-Z projection. The
-bridge expects the raw callback image in SlideBook's
+bridge expects the raw montage image in SlideBook's
 `(position, height, width)` order and converts it to CelFDrive's
 `(height, width, position)` order. Do not add a projection command unless the
 bridge is deliberately changed and retested for a two-dimensional input.
@@ -67,7 +67,7 @@ After Capture > Run script** to `CelFDrive.sbs`.
 ## Validate before experimental use
 
 1. Run a non-critical montage with one known target.
-2. Confirm the callback image has one raw plane per returned stage position;
+2. Confirm the raw image has one plane per returned stage position;
    an axis/position mismatch is an integration error, not a value to guess.
 3. Confirm the target coordinates, objective offsets, generated postscan
    script, and `Run6DCapture()` output in SlideBook.

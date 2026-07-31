@@ -27,7 +27,7 @@ def test_raw_slidebook_montage_rejects_non_three_dimensional_images():
         bridge._to_celfdrive_montage(np.zeros((3, 4)))
 
 
-def test_callback_forwards_stage_data_and_applies_configured_objective_offset(monkeypatch):
+def test_slidebook_entrypoint_forwards_stage_data_and_applies_objective_offset(monkeypatch):
     received = {}
 
     def fake_targets(**kwargs):
