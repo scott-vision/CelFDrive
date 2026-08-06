@@ -1,14 +1,17 @@
+"""Read and update CellClicker's ``cell_reigons.xml`` annotation database."""
+
 import xml.etree.ElementTree as ET
 import cv2
 import os
 import numpy as np
-from .clicker_utils import get_previous_image_name, convert_path_format
+from .clicker_utils import get_previous_image_name, convert_path_format, get_relative_image_name
 import pandas as pd
 
 import os
 import xml.etree.ElementTree as ET
 
 def check_xml(xml_path):
+    """Create an empty CellClicker region XML document when ``xml_path`` is absent."""
     if not os.path.exists(xml_path):
         # Create the root element
         root = ET.Element("annotations")
@@ -23,21 +26,15 @@ def check_xml(xml_path):
 
 # suspect label_name not needed anymore, currently used to find out if something exists
 def find_labels_and_extract_rois(xml_path, label_name, image_path):
-    """Gets all the labels asociated with a series that ends with a given file.
-
-    Args:
-        xml_path (string): Path to cellreigons.xml
-        label_name (string): label path
-        image_path (string): image path
-    Returns:
-
-    """
+    """Return normalized YOLO regions for one image and label from region XML."""
     labels = {}
     first_label_name = label_name
     first_image_path = image_path
     # Parse the XML file
     tree = ET.parse(xml_path)
     root = tree.getroot()
+    # print(convert_path_format(label_name))
+    # print("searching...")
 
     # Find the parent element with the specified label name
     parent_elem = None
@@ -45,6 +42,7 @@ def find_labels_and_extract_rois(xml_path, label_name, image_path):
         print(convert_path_format(elem.find("name").text))
         if convert_path_format(elem.find("name").text) == convert_path_format(label_name):
             parent_elem = elem
+            # print("foundname")
             break
 
     if parent_elem is not None:
@@ -78,13 +76,18 @@ def find_labels_and_extract_rois(xml_path, label_name, image_path):
                 image_path = get_previous_image_name(image_path)
 #                 print(image_path)
                 labels[series_id].append(roi)
-    
+
             labels[series_id].reverse()
-    
-    
+
+
     return labels
 
 def append_cell_regions_xml(xml_path, label_path, class_id, x_center, y_center, width, height, img_width, img_height, series):
+    """Append one pixel-space annotation to ``cell_reigons.xml``.
+
+    The pixel centre box is normalized by ``img_width`` and ``img_height``
+    before persistence; ``series`` identifies the time-series annotation.
+    """
     # Check if the XML file already exists; if not, create it
     if not os.path.exists(xml_path):
         root = ET.Element("annotations")
@@ -158,6 +161,7 @@ def append_cell_regions_xml(xml_path, label_path, class_id, x_center, y_center, 
 
 
 def get_all_label_names(xml_path):
+    """List unique annotation image paths stored in region XML."""
     label_names = []
 
     # Parse the XML file
@@ -174,6 +178,7 @@ def get_all_label_names(xml_path):
 
 
 def get_series_count_for_label(xml_path, label_name):
+    """Return the number of annotated series for one image path."""
     if not os.path.exists(xml_path):
         return 0  # Return 0 if the XML file doesn't exist
 
@@ -197,30 +202,35 @@ def get_series_count_for_label(xml_path, label_name):
     return series_count
 
 
-def get_all_images(xml_path):
-    """_summary_
+def get_all_images(xml_path, progress_callback=None):
+    """Load images referenced by region XML, grouped by path and series.
 
-    Args:
-        xml_path (string): Path to Cellreigons.xml
-
-    Returns:
-        dict(string, int ): Dict of label path series id pairs :a list of images 
+    ``progress_callback`` receives ``(current, total, image_path)`` while
+    images are read. Returned arrays retain image row/column axis order.
     """
     if not os.path.exists(xml_path):
         return 0  # Return 0 if the XML file doesn't exist
     
+    # here we need to make this run across devices, so if the location has changed we connect via the folder name
     print(xml_path)
 
+#     print("running")
     label_names = get_all_label_names(xml_path)
+#     print(label_names)
+#     print("anmes are there")
     image_names = [x.replace(".txt", ".png").replace("labels", "images") for x in label_names]
     allimages = {}
-    for (label_path, image_path) in zip(label_names, image_names):
+    total_items = len(label_names)
+    for index, (label_path, image_path) in enumerate(zip(label_names, image_names), start=1):
+#         print(label_path, image_path)
         image_path = xml_path.split("cell_reigons.xml")[0]+image_path.split("/images/")[1]
         print("finding: " +image_path)
-        # Get a dictionary for that label path
         image_dict = find_labels_and_extract_rois(xml_path, label_path, image_path)
+#         print(image)
         for series_id in image_dict.keys():
             allimages[(label_path, series_id)] = image_dict[series_id]
+        if progress_callback is not None:
+            progress_callback(index, total_items, image_path)
 
 #     result_dict = {(text, key): value for text, inner_dict in allimages.items() for key, value in inner_dict.items()}
 
@@ -230,6 +240,7 @@ def get_all_images(xml_path):
 
 
 def cell_xml_to_dataframe(xml_file):
+    """Read region XML into a dataframe of normalized boxes and source metadata."""
     # Parse the XML file
     tree = ET.parse(xml_file)
     root = tree.getroot()
@@ -270,37 +281,32 @@ def cell_xml_to_dataframe(xml_file):
     return df
 
 def cell_xml_to_dataframe_absfilenames(xml_file):
-    # Parse the XML file
+    """Parse XML into a DataFrame with absolute file paths and series IDs."""
+
     tree = ET.parse(xml_file)
     root = tree.getroot()
 
-    # Prepare a list to hold the data
     data_entries = []
 
-    # Iterate through each 'path' in the XML
     for path in root.findall('path'):
         path_name = path.find('name').text
-        # we create a copy to decrease value as going along without affecting from series to series
-        path_name_series = path.find('name').text
+        path_name_series = path.find('name').text  # Copy for decrementing over series
         
         for series in path.findall('series'):
             series_id = series.get('id')
             path_name_series = path_name
-            # print(path_name)
-            # print(series_id)
-        # Iterate through each 'label' within 'series'
-            for label in series.findall('./label'):
+
+            for label in series.findall('label'):
                 class_id = label.find('class_id').text
-                # print(class_id)
                 x_center = label.find('x_center').text
                 y_center = label.find('y_center').text
                 width = label.find('width').text
                 height = label.find('height').text
 
-                # Append this entry as a dict to the list
+                # Append data including series ID
                 data_entries.append({
                     'PathName': path_name_series,
-                    'SeriesID': series_id,
+                    'SeriesID': series_id,  # Now we track series
                     'ClassID': class_id,
                     'XCenter': x_center,
                     'YCenter': y_center,
@@ -309,13 +315,12 @@ def cell_xml_to_dataframe_absfilenames(xml_file):
                 })
                 path_name_series = get_previous_image_name(str(path_name_series))
 
-            
+    return pd.DataFrame(data_entries)
 
-    # Create a DataFrame from the list of dicts
-    df = pd.DataFrame(data_entries)
-    return df
+
 
 def modify_class_ids(df, selected_indices, target_class_id = 2):
+    """Apply a target class ID to dataframe rows identified by selected indices."""
     # selected_indices is a dict with keys as (PathName, SeriesID) and values as the selected index
     # Example: selected_indices = {('path1', '1'): 5, ('path2', '2'): 3, ...}
 
@@ -347,3 +352,88 @@ def modify_class_ids(df, selected_indices, target_class_id = 2):
 
     return modified_df
 
+# Example usage
+# df is your original DataFrame
+# selected_indices is your dictionary of selected indices for each (PathName, SeriesID)
+# selected_indices = {('finder-camera4_3/labels/20220329_4_3_P1 - 1t027.txt', '1'): 5, ...}
+# target_class_id is the class ID to be set for the selected index
+
+
+# # Example usage
+# xml_path = "cell_regions.xml"
+# label_name = "example1.txt"
+
+# series_count = get_series_count_for_label(xml_path, label_name)
+# print(f"Number of series for '{label_name}': {series_count}")
+
+# # Example usage
+# xml_path = "cell_regions.xml"
+# label_name = "example1.txt"
+
+# series_count = get_series_count_for_label(xml_path, label_name)
+# print(f"Number of series for '{label_name}': {series_count}")
+
+# # Example usage
+# xml_path = "cell_regions.xml"
+# label_name = "example1.txt"
+# image_path = "example1.jpg"
+
+# result = find_labels_and_extract_rois(xml_path, label_name, image_path)
+# print(result)
+
+def remove_entry_from_xml(xml_path, label_path, series_id):
+    """
+    Removes a series from the XML and updates remaining series IDs to keep them consecutive.
+
+    Parameters:
+    - xml_path (str): Path to the XML file.
+    - label_path (str): Image path corresponding to the series.
+    - series_id (str or int): ID of the series to remove.
+    """
+    if not os.path.exists(xml_path):
+        print(f"XML file '{xml_path}' does not exist.")
+        return
+
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+
+    # Locate the <path> element
+    parent_elem = None
+    for elem in root.findall("path"):
+        if elem.find("name").text == label_path:
+            parent_elem = elem
+            break
+
+    if parent_elem is None:
+        print(f"No entry found for {label_path}.")
+        return
+
+    # Find and remove the target series
+    series_to_remove = None
+    series_list = []
+
+    for series_elem in parent_elem.findall("series"):
+        series_list.append(series_elem)  # Collect all series
+        if series_elem.get("id") == str(series_id):
+            series_to_remove = series_elem
+
+    if series_to_remove:
+        parent_elem.remove(series_to_remove)
+        print(f"Series {series_id} removed from {label_path}.")
+
+        # Adjust series IDs to remain consecutive
+        new_series_id = 1
+        for series_elem in sorted(parent_elem.findall("series"), key=lambda s: int(s.get("id"))):
+            series_elem.set("id", str(new_series_id))
+            new_series_id += 1
+
+        # Remove <path> if there are no series left
+        if not parent_elem.findall("series"):
+            root.remove(parent_elem)
+            print(f"Removed {label_path} as no series remain.")
+
+        # Save updated XML
+        tree.write(xml_path)
+        print("XML updated successfully.")
+    else:
+        print(f"Series {series_id} not found in {label_path}.")

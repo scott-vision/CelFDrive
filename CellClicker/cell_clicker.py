@@ -1,3 +1,5 @@
+"""Interactive CellClicker GUI for drawing boxes across image series."""
+
 import os
 import re
 import cv2
@@ -5,11 +7,12 @@ import numpy as np
 import tkinter as tk
 from tkinter import Button, Toplevel, Label, filedialog, messagebox
 from PIL import Image, ImageTk
-from CellClicker.manageXML import get_series_count_for_label, append_cell_regions_xml, check_xml
+from CellClicker.manageXML import get_series_count_for_label, append_cell_regions_xml, check_xml, remove_entry_from_xml
 from CellClicker.clicker_utils import get_previous_image_name, yolov5_to_xywh
 
 
 class ImageProcessor:
+    """Load and normalize microscope image files for annotation display."""
     def __init__(self, master, image_path, bbox, xml_path):
         self.master = master
         self.image_path = image_path
@@ -23,7 +26,7 @@ class ImageProcessor:
         self.image_window.title("Cell Clicker")
 
         # Display area for images
-        self.canvas = tk.Canvas(self.image_window, width=500, height=500)
+        self.canvas = tk.Canvas(self.image_window, width=200, height=200)
         self.canvas.pack()
 
         # Status label
@@ -42,15 +45,7 @@ class ImageProcessor:
         self.display_roi()
 
     def normalize_image(self, image):
-        """Normalise image by subtracting the minimum and dividing by the range, 
-        then convert to np.uint8.
-
-        Args:
-            image (np.uint8): Input image.
-
-        Returns:
-            np.uint8 : Normalised image.
-        """
+        """ Normalizes an image to a range of [0, 255] and converts it to uint8 data type. """
         image = (image - image.min()) / (image.max() - image.min()) * 255
         return image.astype(np.uint8)
     
@@ -82,11 +77,12 @@ class ImageProcessor:
         self.current_x, self.current_y = max(0, self.bbox['x'] - expand), max(0, self.bbox['y'] - expand)
         self.current_w = min(self.x_shape, self.current_x + self.bbox['width'] + 2*expand) - self.current_x
         self.current_h = min(self.y_shape, self.current_y + self.bbox['height'] + 2*expand) - self.current_y
-
+        self.canvas.config(width=self.current_w, height=self.current_h)
         # print(self.current_x, self.current_y, self.current_w, self.current_h)
         roi = self.normalize_image(img[self.current_y:self.current_y+self.current_h, self.current_x:self.current_x+self.current_w])
         self.image = ImageTk.PhotoImage(image=Image.fromarray(roi))
         self.canvas.create_image(0, 0, image=self.image, anchor=tk.NW)
+
 
         
         # param = {'x': x, 'y': y, 'width': w, 'height': h, 'img': img, 'image_name': self.image_path,
@@ -137,9 +133,11 @@ class ImageProcessor:
 
 
 class ImageViewer:
-    def __init__(self, root):
+    """Tk annotation window for creating bounding boxes across image series."""
+    def __init__(self, root, project_dir=None):
         self.root = root
         self.root.title("Image Viewer")
+        self.project_dir = os.path.normpath(project_dir) if project_dir else None
         
 
         # Set up the frame for navigation buttons
@@ -212,20 +210,21 @@ class ImageViewer:
     def set_focus_to_entry_box(self):
         self.frame_entry.focus_set()
 
+
     def focus_in_event(self, event):
         self.frame_entry.focus_set()
 
     def left_arrow(self, event):
         self.prev_image()
-
     def right_arrow(self, event):
         self.next_image()
 
     def load_images(self):
-        """_summary_
-        """
         # Ask the user for the directory
-        directory = filedialog.askdirectory(title="Select Directory with Images")
+        if self.project_dir:
+            directory = self.project_dir
+        else:
+            directory = filedialog.askdirectory(title="Select Directory with Images")
         if not directory:
             return
         
@@ -237,6 +236,7 @@ class ImageViewer:
         print(directory)
         self.xml_path = os.path.join(directory, "cell_reigons.xml")
         self.xml_df = check_xml(self.xml_path)
+        print(self.xml_df)
         if not self.xml_df.empty:
             self.original_image_folder = os.path.normpath(self.xml_df['PathName'][0].split("images")[0])
 
@@ -247,6 +247,10 @@ class ImageViewer:
         self.original_image_folder = os.path.normpath(self.original_image_folder)
 
         print(f'original image folder: {self.original_image_folder}')
+
+
+
+
         self.images = [self.normalize_path(os.path.join(directory, f)) for f in os.listdir(directory) if f.endswith(supported_formats)]
 
         if not self.images:
@@ -256,30 +260,12 @@ class ImageViewer:
         self.images.sort()
 
     def norm_esc_str(self, path):
-        """Normalize+escape and convert all path separators to forward slashes for 
-        uniformity.
-
-        Args:
-            path (string): Path to normalise.
-
-        Returns:
-            string: Normalised path.
-        """
         path_normalized = os.path.normpath(path)
         path_escaped = re.escape(path_normalized)
         return path_escaped
     
     def normalize_path(self, path):
-        """Normalize and convert all path separators to forward slashes for 
-        uniformity.
-
-        Args:
-            path (string): Path to normalise.
-
-        Returns:
-            string: Normalised path.
-        """
-        
+        """Normalize and convert all path separators to forward slashes for uniformity."""
         return os.path.normpath(path).replace(os.sep, '/')
 
 
@@ -298,22 +284,69 @@ class ImageViewer:
         
 #     filter to current image
         if not self.xml_df.empty:
-            filtered_df = self.xml_df[self.xml_df['PathName'].apply(lambda path: os.path.normpath(path)).str.contains((img_path))]
-            # print(self.xml_df)
-            # filtered_df = self.xml_df[self.xml_df['PathName'].str.contains(img_path)]
-            # print(filtered_df)
-            self.existing_bboxes = filtered_df.apply(lambda row: yolov5_to_xywh(float(row['XCenter']), float(row['YCenter']), float(row['Width']), float(row['Height']), self.original_image.width, self.original_image.height), axis=1).tolist()
+            filtered_df = self.xml_df[self.xml_df['PathName'].apply(lambda path: os.path.normpath(path)).str.contains(img_path)]
+
+            if filtered_df.empty:
+                self.existing_bboxes = []  # No bounding boxes found
+            else:
+                # Sort by series and class order, then group by series
+                grouped = filtered_df.sort_values(by=["SeriesID", "ClassID"]).groupby("SeriesID")
+
+                # Extract bounding boxes correctly
+                self.existing_bboxes = [
+                    (
+                        *yolov5_to_xywh(
+                            float(row[3]),  # XCenter
+                            float(row[4]),  # YCenter
+                            float(row[5]),  # Width
+                            float(row[6]),  # Height
+                            self.original_image.width,
+                            self.original_image.height
+                        ),
+                        series_id,
+                        int(row[2]) == 0  # `is_last` is True if Class ID is 0
+                    )
+                    for series_id, group in grouped
+                    for row in group.itertuples(index=False, name=None)  # Access row values as tuple
+                ]
         else:
             self.existing_bboxes = []
         
         self.display_image()
-        # print(self.existing_bboxes)
+        print(self.existing_bboxes)
         self.draw_existing_bboxes()
 
     def handle_resize(self, event):
-        # Resize based on the current canvas size, using the original image
+        """Ensure the image fits within the canvas while maintaining aspect ratio."""
         if self.original_image:
-            self.resize_image(event.width, event.height)
+            screen_height = self.root.winfo_screenheight()
+            max_canvas_height = int(screen_height * 0.75)  # Max height is 3/4 of screen height
+
+            img_width, img_height = self.original_image.size
+            aspect_ratio = img_width / img_height
+
+            # Determine the new size while keeping aspect ratio
+            new_height = min(event.height, max_canvas_height)
+            new_width = int(new_height * aspect_ratio)
+
+            # Ensure it fits within the new window width
+            if new_width > event.width:
+                new_width = event.width
+                new_height = int(new_width / aspect_ratio)
+
+            # Resize the image
+            resized_image = self.original_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            self.photo_img = ImageTk.PhotoImage(resized_image)
+
+            # Update canvas dimensions
+            self.canvas.config(width=new_width, height=new_height)
+
+            # Clear and redraw the image
+            self.canvas.delete("all")  # Remove previous image to prevent layering
+            self.canvas.create_image(0, 0, image=self.photo_img, anchor=tk.NW)
+            self.draw_existing_bboxes()
+
+
 
     def resize_image(self, width, height):
         # Avoid resizing to zero to prevent PIL errors
@@ -324,19 +357,34 @@ class ImageViewer:
 
     def display_image(self):
         if self.original_image:
-            self.photo_img = ImageTk.PhotoImage(self.original_image)
-            self.canvas.config(width=self.photo_img.width(), height=self.photo_img.height())
-            self.canvas.create_image(0, 0, image=self.photo_img, anchor=tk.NW)
-            self.label.config(text=os.path.basename(self.images[self.current_image]))
-            self.canvas.delete(self.rect)
-            self.rect = None
-            # Update button states
-            self.btn_back.config(state=tk.NORMAL if self.current_image > 0 else tk.DISABLED)
-            self.btn_forward.config(state=tk.NORMAL if self.current_image < len(self.images) - 1 else tk.DISABLED)
-            self.resize_image(self.canvas.winfo_width(), self.canvas.winfo_height())
+            # Get screen height and calculate 3/4 of it
+            screen_height = self.root.winfo_screenheight()
+            max_canvas_height = int(screen_height * 0.75)
 
-            # here we want to apply any existing bounding boxes
-            # self.rect = self.canvas.create_rectangle(self.start_x, self.start_y, self.start_x, self.start_y, outline='red')
+            # Get the original image dimensions
+            img_width, img_height = self.original_image.size
+
+            # Calculate new width while maintaining aspect ratio
+            aspect_ratio = img_width / img_height
+            new_width = int(max_canvas_height * aspect_ratio)
+            new_height = max_canvas_height
+
+            # Resize the image to fit within the calculated dimensions
+            self.resized_image = self.original_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+            # Update the canvas size dynamically
+            self.canvas.config(width=new_width, height=new_height)
+
+            # Display the resized image
+            self.photo_img = ImageTk.PhotoImage(self.resized_image)
+            self.canvas.create_image(0, 0, image=self.photo_img, anchor=tk.NW)
+
+            # Update label with filename
+            self.label.config(text=os.path.basename(self.images[self.current_image]))
+
+            # Ensure existing bounding boxes are redrawn
+            self.draw_existing_bboxes()
+
 
 
     def start_bbox(self, event):
@@ -378,65 +426,102 @@ class ImageViewer:
             })
 
     def draw_existing_bboxes(self):
-        """ Draw existing bounding boxes on the canvas. 
-        """
-        # Scale factors for bounding boxes
+        """Draw bounding boxes and place 'X' buttons only on the last bounding box of each series."""
+
+        self.canvas.delete("bbox")  # Clear previous bounding boxes
+        self.canvas.delete("delete_x")  # Clear previous delete markers
+        self.delete_buttons = {}  # Store delete button references
+
         scale_x = self.canvas.winfo_width() / self.original_image.width
         scale_y = self.canvas.winfo_height() / self.original_image.height
-        
+
         for bbox in self.existing_bboxes:
-            x, y, w, h = bbox  # Assuming bbox format [x, y, width, height]
-            # print(bbox)
+            x, y, w, h, series_id, is_last = bbox  # Extract data
+
             # Calculate scaled coordinates
             scaled_x = int(x * scale_x)
             scaled_y = int(y * scale_y)
             scaled_w = int(w * scale_x)
             scaled_h = int(h * scale_y)
-            self.canvas.create_rectangle(scaled_x, scaled_y, scaled_x + scaled_w, scaled_y + scaled_h, outline='green')
+
+            # Draw bounding box
+            self.canvas.create_rectangle(
+                scaled_x, scaled_y, scaled_x + scaled_w, scaled_y + scaled_h,
+                outline="green", tags="bbox"
+            )
+
+            # Only draw "X" button if this is the last one in the series
+            if is_last:
+                button_size = 16  # Button size
+                button_x1 = scaled_x + scaled_w - button_size - 2
+                button_y1 = scaled_y + 2
+                button_x2 = button_x1 + button_size
+                button_y2 = button_y1 + button_size
+
+                # Draw small square button
+                button_id = self.canvas.create_rectangle(
+                    button_x1, button_y1, button_x2, button_y2, fill="red", tags="delete_x"
+                )
+
+                # Draw "X" inside button
+                text_id = self.canvas.create_text(
+                    (button_x1 + button_x2) // 2, (button_y1 + button_y2) // 2,
+                    text="X", fill="white", font=("Arial", 10, "bold"), tags="delete_x"
+                )
+                # Map the delete button to the Series ID
+                self.delete_buttons[button_id] = series_id
+                self.delete_buttons[text_id] = series_id  # Ensure both rectangle and text respond to clicks
+
+        # Bind clicks to delete
+        self.canvas.tag_bind("delete_x", "<Button-1>", self.handle_delete_click)
+
+
+
+
+    def handle_delete_click(self, event):
+        """Handles clicks on 'X' buttons, removes the series, and updates IDs."""
+
+        clicked_x_id = self.canvas.find_closest(event.x, event.y)[0]
+
+        if clicked_x_id in self.delete_buttons:
+            series_id_to_remove = self.delete_buttons[clicked_x_id]
+            image_path = self.images[self.current_image]
+
+            # Remove the series and adjust remaining IDs
+            remove_entry_from_xml(self.xml_path, label_path=image_path, series_id=series_id_to_remove)
+
+            # Refresh display
+            self.update_progress()
+
+
+
+
 
     def update_progress(self):
-        """Check xml is fine and update the boxes, update the UI.
-        """
-        self.xml_df = check_xml(self.xml_path)
-        # print(self.xml_df)
-        self.update_image()
+        """Reloads the XML data and refreshes the bounding box display."""
+        self.xml_df = check_xml(self.xml_path)  # Reload XML
+        self.update_image()  # Refresh display
+
 
     def start_clicker(self, bbox):
-        """Load up clicker with initial bounding box.
-
-        Args:
-            bbox (dict): x,y, width height
-        """
-        
-        # print("Bounding Box Details:")
-        # print(f"Start Coordinates: ({bbox['x']}, {bbox['y']})")
-        # print(f"Width: {bbox['width']} pixels")
-        # print(f"Height: {bbox['height']} pixels")
         bbox['label'] = 'u-0'
         img_path = self.images[self.current_image]
         ImageProcessor(self.root, img_path, bbox, self.xml_path)
 
     def next_image(self):
-        """Go to next frame and update image.
-        """
         if self.current_image < len(self.images) - 1:
             self.current_image += 1
             self.update_image()
 
     def prev_image(self):
-        """Go to previous frame and update image.
-        """
         if self.current_image > 0:
             self.current_image -= 1
             self.update_image()
 
     def go_to_frame(self):
-        """Go to given frame and update image.
-        """
         frame_number = int(self.frame_number.get())
         if 0 <= frame_number < len(self.images):
             self.current_image = frame_number
             self.update_image()
         else:
             messagebox.showerror("Error", "Invalid frame number")
-

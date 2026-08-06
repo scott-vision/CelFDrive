@@ -1,3 +1,5 @@
+"""Create or select the user XML file used to store phase annotations."""
+
 # import os
 # import xml.etree.ElementTree as ET
 # import tkinter as tk
@@ -92,6 +94,7 @@ import xml.etree.ElementTree as ET
 import tkinter as tk
 
 class NameSelector:
+    """Tk dialog that selects or creates the XML file for one annotator."""
     def __init__(self, xml_folder_path):
         self.xml_path = xml_folder_path
         self.selected_xml_path = None  # Initialize with None
@@ -154,6 +157,7 @@ class NameSelector:
 
 
 def run_name_selector(xml_folder_path):
+    """Open the name-selection dialog and return the selected XML path."""
     app = NameSelector(xml_folder_path)
     selected_xml_file = app.run()
     print("Selected XML File:", selected_xml_file)

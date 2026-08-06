@@ -1,7 +1,14 @@
+"""Path, image-series, and YOLO bounding-box utilities for CellClicker.
+
+Pixel boxes use ``(x_min, y_min, x_max, y_max)`` or ``(x, y, width, height)``
+as named by each function; YOLO values are normalized to image dimensions.
+"""
+
 import re
 import os
 
 def convert_path_format(input_path):
+    """Return ``input_path`` with separators normalized for the current OS."""
     if os.name == 'posix':
         # Running on macOS or Linux, convert to macOS-style path
         return input_path.replace('\\', '/')
@@ -27,6 +34,7 @@ def get_previous_image_name(image_name):
         return None  # Return None if the format doesn't match
     
 def get_relative_image_name(image_name, stepback):
+    """Return the image filename ``stepback`` frames before a series filename."""
     """Decrease the timepoint of the image by stepback and return the new image name."""
     # Extract the timepoint using regular expression
     match = re.search(r't(\d{3})\.png$', image_name)
@@ -58,6 +66,11 @@ def get_relative_label_name(image_name, stepback):
     
     
 def append_yolov5_label(label_path, x_center, y_center, width, height, img_width, img_height, class_id):
+    """Append one pixel-space box as a normalized YOLO label line.
+
+    ``x_center`` and ``y_center`` are image pixels; width/height are pixel
+    extents; ``img_width``/``img_height`` define the normalization dimensions.
+    """
     """Append a new YOLOv5 label to a label file, removing any existing newline characters."""
     # Normalize the coordinates
     x_center /= img_width
@@ -80,6 +93,7 @@ def append_yolov5_label(label_path, x_center, y_center, width, height, img_width
         f.write(new_label)
         
 def yolov5_to_xyxy(x_center, y_center, width, height, image_width, image_height):
+    """Convert a normalized YOLO centre box to pixel ``(x_min, y_min, x_max, y_max)``."""
     # Convert YOLOv5 coordinates to real coordinates
     x_center_real = x_center * image_width
     y_center_real = y_center * image_height
@@ -97,6 +111,7 @@ def yolov5_to_xyxy(x_center, y_center, width, height, image_width, image_height)
     return [x1, y1, x2, y2]
 
 def yolov5_to_xywh(x_center, y_center, width, height, image_width, image_height):
+    """Convert a normalized YOLO centre box to pixel ``(x, y, width, height)``."""
     # Convert YOLOv5 coordinates to real coordinates
     x_center_real = x_center * image_width
     y_center_real = y_center * image_height

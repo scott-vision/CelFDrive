@@ -1,3 +1,9 @@
+"""Aggregate phase selections and generate phase-specific YOLO labels.
+
+Image coordinates are pixels until converted to normalized YOLO
+``(class_id, x_center, y_center, width, height)`` records.
+"""
+
 import cv2
 import numpy as np
 import xml.etree.ElementTree as ET
@@ -7,6 +13,7 @@ from .clicker_utils import get_relative_image_name
 
 
 def xyxy_to_yolov5(x_min, y_min, x_max, y_max, img_width, img_height):
+    """Convert pixel ``(x_min, y_min, x_max, y_max)`` bounds to normalized YOLO."""
     # Calculate bounding box center
     center_x = (x_min + x_max) / 2.0
     center_y = (y_min + y_max) / 2.0
@@ -25,6 +32,11 @@ def xyxy_to_yolov5(x_min, y_min, x_max, y_max, img_width, img_height):
 
 
 def adjust_bbox_via_threshold(image_path, label, x_center_norm, y_center_norm, width_norm, height_norm):
+    """Tighten a normalized YOLO box using Otsu thresholding in its image ROI.
+
+    Returns ``(class_id, x_center, y_center, width, height)`` with normalized
+    values. Image X/Y coordinates are columns/rows respectively.
+    """
     # Load image
     image = cv2.imread(image_path)
     if image is None:
@@ -114,6 +126,7 @@ def adjust_bbox_via_threshold(image_path, label, x_center_norm, y_center_norm, w
 
 
 def parse_xml_for_phases(xml_file):
+    """Read selected phase indices from user XML keyed by image path and series."""
     """ Parse XML and get phase indices for each image and series. """
     tree = ET.parse(xml_file)
     root = tree.getroot()
@@ -144,6 +157,7 @@ def parse_xml_for_phases_resume(xml_file):
     return image_data
 
 def parse_xml_for_labels(xml_file):
+    """Read CellClicker region XML into label records grouped by image and series."""
     """ Parse annotation XML and return structured label data. """
     tree = ET.parse(xml_file)
     root = tree.getroot()
@@ -174,6 +188,7 @@ def generate_filename(base_path, offset):
     return new_filename
 
 def get_phase(new_index, phases):
+    """Return the phase active at a chronological image index."""
     # Iterate over the phases
     for phase, value in phases.items():
         # Check if the new index is larger than the corresponding value
@@ -183,6 +198,7 @@ def get_phase(new_index, phases):
     return None
 
 def create_yolo_labels(phase_data, labels_data, output_dir, user, imgpath):
+    """Write phase-classified normalized YOLO labels from parsed XML mappings."""
     """ Generate YOLO label files considering class_id as filename reference. """
     os.makedirs(output_dir, exist_ok=True)
     
@@ -211,12 +227,14 @@ def create_yolo_labels(phase_data, labels_data, output_dir, user, imgpath):
             process_label(label, indices[offset:], sorted_phases, class_dict, path, user, total_series_length)
 
 def get_filtered_phases(phase_data, path, series_id, imgpath):
+    """Return valid phase indices for one image path and series."""
     # remove the phase if skipped
     phases = phase_data.get((path, series_id), {})
     path = imgpath + "/images/" + path.split("/images/")[1]
     return {k: v for k, v in phases.items() if v != -1}
 
 def get_telophase_max_index(phases, telophase_limit, total_indices):
+    """Calculate the final usable chronological index for telophase labels."""
     #  as the list of phases is reversed and the loop counts down we need total indicies - where we want to stop, in order to determine where to start, it also must substract 1 in order to adjust for slicing
     telophase_max_index = total_indices
     if 'telophase' in phases:
@@ -225,10 +243,12 @@ def get_telophase_max_index(phases, telophase_limit, total_indices):
     return telophase_max_index
 
 def sort_phases(phases):
+    """Return phase indices ordered from earliest to latest selected phase."""
     # reverse the phases dict
     return dict(sorted(phases.items(), key=lambda item: item[1], reverse=True))
 
 def process_label(label, indices, sorted_phases, class_dict, path, user, total_series_length):
+    """Assign one source label to a phase class and adjusted output frame."""
     # as the set is backwards - class id to get new class id
     new_index = total_series_length - int(label['class_id']) -1
 
@@ -241,6 +261,7 @@ def process_label(label, indices, sorted_phases, class_dict, path, user, total_s
         write_yolo_label(filename, user, new_class_id, adjusted_label)
 
 def write_yolo_label(filename, user, new_class_id, adjusted_label):
+    """Append a normalized YOLO box to the selected user's label file."""
     yolo_label = f"{new_class_id} {adjusted_label[1]} {adjusted_label[2]} {adjusted_label[3]} {adjusted_label[4]}"
     filename = filename.replace('.png', '.txt').replace('images', f"{user}_labels")
     with open(filename, 'a') as file:
@@ -249,6 +270,11 @@ def write_yolo_label(filename, user, new_class_id, adjusted_label):
 
 
 def convert_selections_multiphase(user_xml, cell_reigons_xml, new_label_folder, user, imgpath):
+    """Convert one user's phase XML and region XML into YOLO label files.
+
+    The output contains normalized class-ID centre boxes and is written beneath
+    ``new_label_folder``.
+    """
 
     phase_data = parse_xml_for_phases(user_xml)
     # print(phase_data)
@@ -363,6 +389,7 @@ def create_new_xml_file(aggregated_data, output_file):
     new_tree.write(output_file)
 
 def aggregate_xml(xml_files, output_file):
+    """Aggregate compatible user XML phase selections and write ``output_file``."""
     aggregated_data = aggregate_phase_data(xml_files)
     adjusted_data = adjust_phase_indices(aggregated_data)
     create_new_xml_file(adjusted_data, output_file)

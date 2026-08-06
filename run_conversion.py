@@ -1,3 +1,5 @@
+"""Run the legacy phase-selection-to-YOLO conversion with local settings."""
+
 from CellClicker.convert_selections_multiphase import convert_selections_multiphase
 from glob import glob
 
