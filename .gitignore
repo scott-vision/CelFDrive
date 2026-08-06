@@ -17,3 +17,9 @@ tmp/
 
 # Private manuscript-revision planning notes
 paperinfo/
+
+# Private manuscript source files
+Paper Resource/
+
+# Local Codex repository guidance
+AGENTS.md
