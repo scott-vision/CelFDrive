@@ -1,8 +1,11 @@
+"""Persist and read phase selections in CellClicker user XML files."""
+
 import xml.etree.ElementTree as ET
 import pandas as pd
 
 
 def update_xml(file_name, series_id, selected_index, xml_file_name):
+    """Upsert one legacy selected image index in a user XML document."""
     # Parse the existing XML file
     tree = ET.parse(xml_file_name)
     root = tree.getroot()
@@ -36,6 +39,7 @@ def update_xml(file_name, series_id, selected_index, xml_file_name):
     tree.write(xml_file_name)
 
 def update_xml_multiclass(file_name, series_id, selected_indices, xml_file_name, phases):
+    """Upsert selected indices for ordered phase names in a user XML document."""
     # Parse the existing XML file
     tree = ET.parse(xml_file_name)
     root = tree.getroot()
@@ -80,12 +84,14 @@ def update_xml_multiclass(file_name, series_id, selected_indices, xml_file_name,
 
 
 def store_results(images_dict, selected_indicies, name_xml):
+    """Persist one selected index for every image-series mapping entry."""
 
     for (file_name, series_id ), selected_index in zip(images_dict.keys(), selected_indicies):
         print(file_name, series_id, selected_index, name_xml)
         update_xml(file_name, series_id, selected_index, name_xml)    
 
 def store_results_multiclass(images_dict, selected_indicies, name_xml, phases):
+    """Persist phase selections for every image-series entry in ``images_dict``."""
 
     for (file_name, series_id ), selected_index_dict in zip(images_dict.keys(), selected_indicies):
         print(file_name, series_id, selected_index_dict, name_xml)
@@ -93,6 +99,7 @@ def store_results_multiclass(images_dict, selected_indicies, name_xml, phases):
 
 
 def read_xml_to_dataframe(xml_file):
+    """Return user XML selection records as a pandas dataframe."""
     # Parse the XML file
     tree = ET.parse(xml_file)
     root = tree.getroot()

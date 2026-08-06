@@ -1,3 +1,10 @@
+"""Predict cell states in overview montages and produce capture targets.
+
+The named public API is :func:`get_target_locations`. Montages use NumPy axis
+order ``(height, width, position)``; image X is the column axis and image Y is
+the row axis. Pixel spacing, stage positions, and Z offsets are micrometres.
+"""
+
 from pathlib import Path
 import re
 from datetime import datetime
@@ -71,7 +78,24 @@ def _expand_config_value(value, root_config):
 
 
 def load_predict_config(config_path=CONFIG_PATH):
-    """Load, migrate, and expand a CelFDrive prediction configuration file."""
+    """Load, migrate, and expand a CelFDrive prediction configuration file.
+
+    Parameters
+    ----------
+    config_path : path-like
+        YAML document using schema version 1.
+
+    Returns
+    -------
+    dict
+        Effective configuration after in-place legacy migration and ``${...}``
+        reference expansion.
+
+    Raises
+    ------
+    ValueError
+        If the YAML declares an unsupported schema version.
+    """
     with open(config_path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file)
 
@@ -83,6 +107,7 @@ def load_predict_config(config_path=CONFIG_PATH):
 
 
 def migrate_predict_config(raw_config):
+    """Migrate a schema-version-1 configuration mapping in place for legacy keys."""
     if "profile" not in raw_config and "profiles" in raw_config:
         raw_config["profile"] = raw_config["profiles"].get("sdc", next(iter(raw_config["profiles"].values())))
         raw_config.pop("profiles", None)
@@ -109,6 +134,7 @@ def migrate_predict_config(raw_config):
 
 
 def get_config():
+    """Return the process-cached effective prediction configuration mapping."""
     global config
     if config is None:
         config = load_predict_config()
@@ -116,6 +142,11 @@ def get_config():
 
 
 def get_model():
+    """Load and cache the configured Ultralytics model weights.
+
+    Raises ``ImportError`` when Ultralytics is unavailable and ``ValueError``
+    for unsupported configured backends.
+    """
     global model
     if model is not None:
         return model
@@ -135,6 +166,7 @@ def get_model():
 
 
 def get_backend(cfg):
+    """Validate and return the configured inference backend identifier."""
     backend = cfg["model"].get("backend", "ultralytics_yolo")
     if backend not in SUPPORTED_BACKENDS:
         raise ValueError(f"Unsupported model backend: {backend}. Expected one of {sorted(SUPPORTED_BACKENDS)}")
@@ -142,7 +174,20 @@ def get_backend(cfg):
 
 
 def get_class_info(profile_config):
-    """Return class names, confidence thresholds, and priorities by class ID."""
+    """Return class names, confidence thresholds, and priorities by class ID.
+
+    Parameters
+    ----------
+    profile_config : mapping
+        Config ``profile`` mapping with a ``classes`` mapping keyed by numeric
+        class IDs.
+
+    Returns
+    -------
+    dict[int, tuple[str, float, int]]
+        ``class_id -> (name, confidence_threshold, priority_rank)``. A rank of
+        ``-1`` disables a class from capture-target output.
+    """
     return {
         int(class_id): (
             class_config["name"],
@@ -161,10 +206,12 @@ def get_inference_confidence(class_info):
 
 
 def is_logging_enabled():
+    """Return whether prediction logging and plot output are enabled."""
     return get_config()["logging"].get("enabled", True)
 
 
 def get_logging_directory():
+    """Return the configured logging directory, including date subfolder if enabled."""
     cfg = get_config()
     logging_cfg = cfg["logging"]
     logging_directory = Path(logging_cfg["root_dir"])
@@ -177,6 +224,7 @@ def get_logging_directory():
 
 
 def create_exp_folder(base_dir):
+    """Create and cache the next numbered experiment directory beneath ``base_dir``."""
     global experiment_path
     logging_cfg = get_config()["logging"]
     exp_cfg = logging_cfg["experiment_folder"]
@@ -204,6 +252,7 @@ def create_exp_folder(base_dir):
 
 
 def get_outimg_path():
+    """Return the next unused annotated-image path in the current experiment."""
     global experiment_path
     if experiment_path is None:
         raise RuntimeError("Experiment folder has not been created")
@@ -233,6 +282,7 @@ def get_outimg_path():
 
 
 def filter_and_sort_detections(detections, class_info):
+    """Filter pixel detections by class threshold and order by capture priority."""
     filtered_detections = [
         det for det in detections
         if det[5] >= class_info[det[0]][1] and class_info[det[0]][2] != -1
@@ -245,6 +295,7 @@ def filter_and_sort_detections(detections, class_info):
 
 
 def global_filter_and_sort_detections(all_detections, class_info):
+    """Filter converted target records by class threshold and capture priority."""
     filtered_detections = [
         det for det in all_detections
         if det[3] >= class_info[det[4]][1] and class_info[det[4]][2] != -1
@@ -309,6 +360,24 @@ def plot_image_with_results(image, boxes, class_names, class_info, file_path):
 def preprocess_image(img):
     """Convert a supported 2-D or RGB image to a normalised uint8 image.
 
+    Parameters
+    ----------
+    img : numpy.ndarray
+        A two-dimensional ``(height, width)`` image or a three-dimensional
+        ``(height, width, channel)`` image. X is columns and Y is rows.
+
+    Returns
+    -------
+    numpy.ndarray
+        Normalized ``uint8`` image of shape ``(height, width)``.
+
+    Raises
+    ------
+    TypeError, ValueError
+        If the input type, shape, or configured clipping percentile is invalid.
+
+    Notes
+    -----
     Two-dimensional images are used directly. Three-dimensional images must use
     the configured ``first_channel_if_rgb`` mode, in which case channel zero is
     selected. Values above the configured upper percentile are clipped before
@@ -351,7 +420,18 @@ def preprocess_image(img):
 
 
 def split_image(img):
-    """Split a 2-D image into configured tiles and return each tile and offset."""
+    """Split a 2-D image into configured tiles and return each tile and offset.
+
+    Parameters
+    ----------
+    img : numpy.ndarray
+        ``(height, width)`` image. Tile offsets are pixel ``(x, y)`` values.
+
+    Returns
+    -------
+    list[tuple[numpy.ndarray, int, int]]
+        Tile arrays with their left-column and top-row offsets.
+    """
     tiling_cfg = get_config()["tiling"]
     if not isinstance(img, np.ndarray) or img.ndim != 2:
         raise ValueError("Image tiling expects a two-dimensional numpy.ndarray")
@@ -416,7 +496,12 @@ def _detection_from_values(values):
 
 
 def deduplicate_detections(detections, tolerance_px):
-    """Keep the highest-confidence detection for overlapping same-class boxes."""
+    """Keep the highest-confidence nearby detection for each class.
+
+    ``detections`` contains ``[class_id, x, y, width, height, confidence]``
+    pixel boxes. Centres within ``tolerance_px`` pixels are duplicates only when
+    their class IDs match.
+    """
     tolerance_px = _finite_number(tolerance_px, "tiling.deduplication_tolerance_px")
     if tolerance_px < 0:
         raise ValueError("tiling.deduplication_tolerance_px must be non-negative")
@@ -444,6 +529,7 @@ def deduplicate_detections(detections, tolerance_px):
 
 
 def adjust_coordinates(detections, x_offset, y_offset):
+    """Convert Ultralytics boxes to source-image pixel records with tile offsets."""
     detections_adjusted = []
     for detection in detections:
         box = []
@@ -458,6 +544,7 @@ def adjust_coordinates(detections, x_offset, y_offset):
 
 
 def run_model_inference(img, conf):
+    """Run the configured backend on an RGB image array at a confidence threshold."""
     backend = get_backend(get_config())
     current_model = get_model()
 
@@ -468,13 +555,34 @@ def run_model_inference(img, conf):
 
 
 def ultralytics_results_to_detections(results, x_offset, y_offset):
+    """Convert Ultralytics result objects to pixel detection records."""
     if len(results[0].boxes.xyxy) == 0:
         return []
     return adjust_coordinates(results[0].boxes, x_offset, y_offset)
 
 
 def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=False):
-    """Preprocess an image, run inference, and return pixel-space detections."""
+    """Preprocess an image, run inference, and return pixel-space detections.
+
+    Parameters
+    ----------
+    raw_img : numpy.ndarray
+        Image of shape ``(height, width)`` or ``(height, width, channel)``.
+    conf : float, optional
+        Model inference threshold; defaults to the lowest enabled class limit.
+    save_path : path-like, optional
+        Plot destination when ``plot`` is true.
+    class_info : dict[int, tuple[str, float, int]], optional
+        Class filtering configuration.
+    plot : bool, default=False
+        Save an annotated image as a side effect.
+
+    Returns
+    -------
+    list[list]
+        ``[class_id, x, y, width, height, confidence]`` boxes in source-image
+        pixels, after tile offsets and same-class de-duplication.
+    """
     cfg = get_config()
     if class_info is None:
         class_info = get_class_info(cfg["profile"])
@@ -516,6 +624,7 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
 
 
 def process_image_from_path(image_path, conf=None, save_path=None, class_info=None, plot=False):
+    """Read an image path with OpenCV and delegate to :func:`process_image`."""
     import cv2
 
     if isinstance(class_info, bool) and plot is False:
@@ -539,7 +648,12 @@ def process_single_location(
     y_stage_direction,
     legacy_llsm_y_inversion,
 ):
-    """Run one overview image and convert its detections to capture targets."""
+    """Run one overview image and convert its detections to capture targets.
+
+    ``image`` is a ``(height, width)`` overview plane and ``position`` is in
+    micrometres. Returned records are ``[x, y, z, confidence, class_id, name]``
+    in the requested coordinate mode.
+    """
     height, width = image.shape
     plot_enabled = get_config()["plotting"].get("enabled", True) and is_logging_enabled()
     img_path = get_outimg_path() if plot_enabled else None
@@ -646,6 +760,7 @@ def image_cordinates_to_physical(x, y, im_x, im_y, w, h, new_z, xy_pixel_spacing
 
 
 def merge_close_coordinates(coordinates, tolerance):
+    """Merge target records within an XY tolerance in their output coordinate units."""
     unique_coords = []
 
     for coord in coordinates:
@@ -770,6 +885,21 @@ def process_montage(
     y_stage_direction,
     legacy_llsm_y_inversion,
 ):
+    """Process every plane of a montage and return target coordinate arrays.
+
+    Parameters
+    ----------
+    positions : sequence[CapturePosition]
+        One micrometre-valued stage position per montage plane.
+    image : numpy.ndarray
+        Overview stack with shape ``(height, width, position)``.
+
+    Returns
+    -------
+    tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, list[str]]
+        Target X, Y, Z arrays and class names. X/Y are pixels in ``pixel`` mode
+        and stage coordinates in micrometres otherwise.
+    """
     results = []
     for i, position in enumerate(positions):
         tmp = process_single_location(
@@ -819,10 +949,38 @@ def get_target_locations(
 ):
     """Return capture targets using named parameters and explicit coordinate mode.
 
-    ``image`` must have shape ``(height, width, position)``. ``coordinate_mode``
-    is ``stage`` (the configured default), ``pixel``, or ``callable``. Callable
-    converters receive keyword arguments documented in the README and return
-    ``(x, y, z)``. The return value matches :func:`get_target_location`.
+    Parameters
+    ----------
+    stage_x, stage_y, stage_z : float or sequence[float]
+        One micrometre-valued stage position or equally sized position vectors.
+    image : numpy.ndarray
+        Overview montage shaped ``(height, width, position)``. Its final axis
+        must have one plane per stage position.
+    xy_pixel_spacing_um : float, optional
+        Positive physical width of one pixel for ``stage`` mode; finite for a
+        caller-supplied converter and unused in ``pixel`` mode.
+    x_stage_direction, y_stage_direction : {-1, 1}
+        Orientation of image X/Y relative to the stage axes.
+    z_offset_um : float, optional
+        Offset added to each target Z in micrometres.
+    coordinate_mode : {'stage', 'pixel', 'callable'}, optional
+        Output coordinate convention; defaults to the YAML configuration.
+    coordinate_converter : callable, optional
+        Callable-mode converter returning exactly three finite ``(x, y, z)``
+        values from the documented keyword context.
+
+    Returns
+    -------
+    tuple[int, numpy.ndarray, numpy.ndarray, numpy.ndarray, list[str], list[str], list[str]]
+        Target count; X/Y/Z arrays; capture scripts; display names; and comments.
+        Coordinates are micrometres in stage/callable modes and pixels in pixel
+        mode.
+
+    Raises
+    ------
+    TypeError, ValueError
+        If positions, stack shape, coordinate mode, directions, spacing, or a
+        converter result violates the public contract.
     """
     global experiment_path
 

@@ -1,8 +1,11 @@
+"""Convert legacy user selections into adjusted YOLO label files."""
+
 import pandas as pd
 import os
 from .clicker_utils import append_yolov5_label, get_relative_label_name
 
 def append_modified_labels(df):
+    """Write adjusted legacy selection rows from a dataframe to label files."""
     # Group by 'ImageName' and 'SeriesID'
     grouped = df.groupby(['PathName', 'SeriesID'])
     for (label_path, series_id), group in grouped:
@@ -24,6 +27,7 @@ def append_modified_labels(df):
             label_path = get_relative_label_name(label_path, 1)
             
 def modify_class_ids(df, selected_indices_df, target_class_id):
+    """Replace class IDs for rows selected in a user-selection dataframe."""
     # Normalize the path names in both DataFrames
     df['PathName'] = df['PathName'].apply(lambda x: x.replace('\\', '/'))
     selected_indices_df['PathName'] = selected_indices_df['PathName'].apply(lambda x: x.replace('\\', '/'))

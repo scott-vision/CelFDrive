@@ -14,6 +14,14 @@ CellClicker/.ipynb_checkpoints/
 yolov9/
 tmp/
 .DS_Store
+sam2_*.pt
+
+# Dataset-project outputs created by the annotation suite
+**/aggregated_tracking.xml
+**/tracking_review.xml
+**/exported_labels/
+**/exported_coco/
+**/exported_miniseries/
 
 # Private manuscript-revision planning notes
 paperinfo/

@@ -1,3 +1,9 @@
+"""Example experiment-specific Ultralytics training invocation.
+
+Copy this script and replace the dataset, output, device, and hyperparameter
+values for a versioned experiment; importing it starts a training run.
+"""
+
 from ultralytics import YOLO
 
 model = YOLO('Models/Base/yolov9c.pt')  

@@ -1,3 +1,5 @@
+"""Legacy Tk interface for selecting one image from each annotated series."""
+
 import tkinter as tk
 import os
 from tkinter import filedialog, messagebox
@@ -11,6 +13,7 @@ import numpy as np
 
 
 def load_selector(image_dict, set_index):
+    """Display the legacy selector for image series and return selected indices."""
     selected_indices = []
     image_sets =[]
     
@@ -31,6 +34,7 @@ def load_selector(image_dict, set_index):
 
 
 def normalize_image(image):
+    """Normalize a two-dimensional image array to displayable ``uint8`` values."""
 
     # Normalize the image to the range [0, 1]
     # Normalize the image to the range [0, 255]
@@ -42,6 +46,7 @@ def normalize_image(image):
     return image
     
 def display_set(image_sets, set_index,selected_indices, root):
+    """Render one image series and its selection controls."""
     
     
     window = tk.Toplevel()
@@ -67,10 +72,12 @@ def display_set(image_sets, set_index,selected_indices, root):
 
 
 def on_window_close(window, root):
+    """Close the current selector window and stop its Tk event loop."""
     window.destroy()
     root.quit()  # Quit the Tkinter main loop
 
 def on_blurry_clicked(window, image_sets, selected_indices, root):
+    """Store a blurry-series marker and advance to the next image set."""
     selected_indices.append(-1)
     window.destroy()
     next_set_index = len(selected_indices)
@@ -82,6 +89,7 @@ def on_blurry_clicked(window, image_sets, selected_indices, root):
         root.quit()
 
 def on_selection_clicked(index, window, image_sets, selected_indices, root,set_len):
+    """Store the selected reverse-time index and advance the selector."""
     selected_indices.append(set_len-1-index)
     window.destroy()
     next_set_index = len(selected_indices)
@@ -97,6 +105,7 @@ def on_selection_clicked(index, window, image_sets, selected_indices, root,set_l
 
 
 def load_ui(cell_xml):
+    """Load region XML, select an output XML, and launch the legacy selector."""
     # Call the UI function to run the name selector
     name_xml = run_name_selector("select_xmls")
     print(f"Selected XML: {name_xml}")
@@ -105,6 +114,7 @@ def load_ui(cell_xml):
     store_results(images_dict, selected_indicies, name_xml)
 
 def load_ui_from_folder():
+    """Prompt for a project folder and launch the legacy selector workflow."""
     # Call the UI function to run the name selector
 
     directory = filedialog.askdirectory(title="Select Directory with Images")
@@ -123,6 +133,7 @@ def load_ui_from_folder():
     store_results(images_dict, selected_indicies, name_xml)
     
 def xml_to_labels(name_xml, cell_xml):
+    """Convert legacy selection XML and region XML to modified labels."""
     
     user_df = read_xml_to_dataframe(name_xml)
     
@@ -134,6 +145,7 @@ def xml_to_labels(name_xml, cell_xml):
     
     
 def debug_xml_to_labels(name_xml, cell_xml):
+    """Return legacy user and region XML dataframes for inspection."""
     
     user_df = read_xml_to_dataframe(name_xml)
     
@@ -141,6 +153,7 @@ def debug_xml_to_labels(name_xml, cell_xml):
     return user_df, cell_df
 
 def debug_xml_to_labels2(name_xml, cell_xml):
+    """Return the modified legacy label dataframe without writing label files."""
     
     user_df = read_xml_to_dataframe(name_xml)
     

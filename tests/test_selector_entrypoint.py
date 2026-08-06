@@ -3,6 +3,9 @@ import sys
 import types
 from pathlib import Path
 
+import numpy as np
+import pytest
+
 
 def test_selector_entrypoint_passes_configured_phases(monkeypatch):
     received = []
@@ -24,3 +27,13 @@ def test_selector_entrypoint_passes_configured_phases(monkeypatch):
         "anaphase",
         "telophase",
     ]]
+
+
+def test_normalize_image_handles_constant_image():
+    pytest.importorskip("cv2")
+    from CellClicker.image_selector_multiphase import normalize_image
+
+    normalized = normalize_image(np.full((2, 3), 7, dtype=np.uint16))
+
+    assert normalized.dtype == np.uint8
+    assert np.array_equal(normalized, np.zeros((2, 3), dtype=np.uint8))

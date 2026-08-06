@@ -99,6 +99,20 @@ The current stage conversion is specific to the existing 3i conventions. The leg
 
 ## Annotation and training tools
 
+For new annotation projects, use the unified GUI:
+
+```powershell
+python run_gui.py
+```
+
+It centralises project availability checks and guides the complete workflow:
+track annotation, phase selection, aggregation, track review, optional Otsu or
+SAM2 box generation, YOLO/COCO/miniseries export, and optional YOLO training.
+See [the annotation workflow guide](docs/annotation-workflow.md) for the
+required project layout, tracking XML semantics, and hardware requirements.
+
+The scripts below are retained for legacy workflows:
+
 CellClicker and CellSelector create YOLO-compatible labels from time-series data:
 
 ```powershell
