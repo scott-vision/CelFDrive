@@ -14,9 +14,17 @@ from .image_selector_multiphase import load_ui_for_project
 from .tracking_otsu import run_otsu_on_tracking_xml
 from .tracking_export import export_tracking_xml_to_coco, export_tracking_xml_to_miniseries, export_tracking_xml_to_yolo
 from .tracking_sam2 import DEFAULT_SAM2_DEVICE, DEFAULT_SAM2_MODEL, run_sam2_on_tracking_xml
+from .mitotic_tightener import (
+    DEFAULT_TIGHTENER_SELECTION,
+    TIGHTENER_SELECTION_METADATA_KEY,
+    configure_tightener_weights,
+    run_tightener_on_tracking_xml,
+)
 from .tracking_review_ui import TrackingReviewUI
 from .tracking_workflow import build_tracking_xml_from_dataset
+from .tracking_xml import read_tracking_xml
 from .yolo_training_ui import YOLOTrainingUI
+from .mitotic_tightener_ui import MitoticTightenerTrainingUI
 
 
 LOGGER = logging.getLogger(__name__)
@@ -112,6 +120,8 @@ class ProjectGUI:
         stage3.pack(fill=tk.X, pady=(0, 10))
         tk.Button(stage3, text="Apply Otsu", command=self.apply_otsu, width=24).pack(side=tk.LEFT, padx=8, pady=8)
         tk.Button(stage3, text="Run SAM/SAM2", command=self.run_sam2, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        tk.Button(stage3, text="Configure Tightener", command=self.configure_tightener, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        tk.Button(stage3, text="Run YOLO11 Tightener", command=self.run_tightener, width=24).pack(side=tk.LEFT, padx=8, pady=8)
 
         stage4 = tk.LabelFrame(right, text="4. Review")
         stage4.pack(fill=tk.X, pady=(0, 10))
@@ -120,7 +130,7 @@ class ProjectGUI:
         stage5 = tk.LabelFrame(right, text="5. Export")
         stage5.pack(fill=tk.X, pady=(0, 10))
         tk.Label(stage5, text="Export box type:").pack(side=tk.LEFT, padx=(8, 4))
-        export_box_menu = tk.OptionMenu(stage5, self.export_box_type_var, "preferred", "original", "otsu", "sam2", "tightened")
+        export_box_menu = tk.OptionMenu(stage5, self.export_box_type_var, "preferred", "original", "otsu", "sam2", "yolo11_tightened", "tightened")
         export_box_menu.pack(side=tk.LEFT, padx=(0, 8), pady=8)
         tk.Button(stage5, text="Export YOLO Labels", command=self.export_yolo_labels, width=24).pack(side=tk.LEFT, padx=8, pady=8)
         tk.Button(stage5, text="Export COCO Labels", command=self.export_coco_labels, width=24).pack(side=tk.LEFT, padx=8, pady=8)
@@ -129,6 +139,7 @@ class ProjectGUI:
         stage6 = tk.LabelFrame(right, text="Notes")
         stage6.pack(fill=tk.X, pady=(0, 10))
         tk.Button(stage6, text="Open YOLO Training", command=self.open_yolo_training, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        tk.Button(stage6, text="Train Mitotic Tightener", command=self.open_tightener_training, width=24).pack(side=tk.LEFT, padx=8, pady=8)
 
         stage7 = tk.LabelFrame(right, text="Notes")
         stage7.pack(fill=tk.BOTH, expand=True)
@@ -504,6 +515,67 @@ class ProjectGUI:
             parent=self.root,
         )
 
+    def configure_tightener(self):
+        """Save the trained tightener checkpoint selected for this project."""
+        if not self._require_project():
+            return
+        tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
+        if not os.path.isfile(tracking_xml):
+            messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.", parent=self.root)
+            return
+        weights_path = filedialog.askopenfilename(
+            title="Select Mitotic Tightener best.pt", initialdir=os.path.join(os.getcwd(), "Models"),
+            filetypes=[("PyTorch weights", "*.pt"), ("All files", "*.*")], parent=self.root,
+        )
+        if not weights_path:
+            return
+        current_selection = DEFAULT_TIGHTENER_SELECTION
+        try:
+            current_selection = read_tracking_xml(tracking_xml).get("metadata", {}).get(
+                TIGHTENER_SELECTION_METADATA_KEY, DEFAULT_TIGHTENER_SELECTION
+            )
+        except Exception:
+            pass
+        selection_strategy = simpledialog.askstring(
+            "Tightener Prediction Selection",
+            "Select `center_confidence` (recommended), `overlap`, or `confidence`:\n"
+            "center_confidence chooses the highest-confidence box containing the original-box centre, then falls back to overlap.",
+            initialvalue=current_selection,
+            parent=self.root,
+        )
+        if selection_strategy is None:
+            return
+        selection_strategy = selection_strategy.strip().lower()
+        try:
+            configure_tightener_weights(tracking_xml, weights_path, selection_strategy=selection_strategy)
+        except Exception as exc:
+            messagebox.showerror("Configure Tightener", str(exc), parent=self.root)
+            return
+        self.status_var.set(f"Configured mitotic tightener ({selection_strategy} selection): {weights_path}")
+
+    def run_tightener(self):
+        if not self._require_project():
+            return
+        tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
+        if not os.path.isfile(tracking_xml):
+            messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.", parent=self.root)
+            return
+        try:
+            stats = self._run_with_progress_dialog(
+                "Running YOLO11 Tightener", "Generating trained tightener box variants...",
+                lambda progress_callback: run_tightener_on_tracking_xml(tracking_xml, progress_callback=progress_callback),
+            )
+        except Exception as exc:
+            LOGGER.exception("Mitotic tightener failed for `%s`.", tracking_xml)
+            messagebox.showerror("YOLO11 Tightener Failed", str(exc), parent=self.root)
+            self.status_var.set("YOLO11 tightener failed.")
+            return
+        self.status_var.set(
+            f"YOLO11 tightener completed. Created {stats['created']}, updated {stats['updated']}, "
+            f"original fallbacks {stats['fallback_original']}, failed {stats['failed']}."
+        )
+        messagebox.showinfo("YOLO11 Tightener Complete", "\n".join(f"{key}: {value}" for key, value in stats.items()), parent=self.root)
+
     def open_yolo_training(self):
         window = tk.Toplevel(self.root)
         app = YOLOTrainingUI(window)
@@ -513,6 +585,13 @@ class ProjectGUI:
             app.train_listbox.insert(tk.END, normalized)
             app.refresh_counts()
             app.status_var.set("Loaded project added to the training list as a starting point.")
+
+    def open_tightener_training(self):
+        window = tk.Toplevel(self.root)
+        app = MitoticTightenerTrainingUI(window)
+        if self.project_dir:
+            app.add_project_to_split("train", self.project_dir)
+            app.refresh_counts()
 
 
 def launch_project_gui():

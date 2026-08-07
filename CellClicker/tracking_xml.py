@@ -21,8 +21,55 @@ DEFAULT_BOX_TYPES = {
     "original": "Box carried forward from the original CellClicker series annotation.",
     "otsu": "Box adjusted by Otsu thresholding.",
     "sam2": "Box adjusted by SAM2.",
+    "yolo11_tightened": "Box adjusted by a trained YOLO11 mitotic tightener.",
     "tightened": "Box manually tightened by a user.",
 }
+
+
+def _rebase_moved_project_paths(tracking_data, xml_file):
+    """Resolve stale absolute image paths after a standard project directory moves.
+
+    Tracking XML lives in ``project/user_selections`` and records the project
+    root in ``metadata.dataset_root``.  If that old root no longer contains an
+    image, its path below ``old_root/images`` is resolved below the current
+    XML's sibling ``project/images`` directory.  Existing paths are never
+    replaced, and paths outside the documented images directory are not guessed.
+    """
+    metadata = tracking_data.get("metadata", {})
+    old_root = metadata.get("dataset_root")
+    if not old_root:
+        return
+
+    current_root = os.path.dirname(os.path.dirname(os.path.abspath(xml_file)))
+    current_images = os.path.join(current_root, "images")
+    old_images = os.path.join(os.path.abspath(old_root), "images")
+    if not os.path.isdir(current_images):
+        return
+
+    rebased_paths = {}
+    for track in tracking_data.get("tracks", []):
+        for timepoint in track.get("timepoints", []):
+            recorded_path = timepoint.get("image_path")
+            if not recorded_path or os.path.isfile(recorded_path):
+                continue
+            try:
+                relative_path = os.path.relpath(os.path.abspath(recorded_path), old_images)
+            except ValueError:
+                continue
+            if relative_path == os.pardir or relative_path.startswith(os.pardir + os.sep):
+                continue
+            candidate_path = os.path.normpath(os.path.join(current_images, relative_path))
+            if os.path.isfile(candidate_path):
+                rebased_paths[recorded_path] = candidate_path
+                timepoint["image_path"] = candidate_path
+
+    if not rebased_paths:
+        return
+    for track in tracking_data.get("tracks", []):
+        source_path = track.get("source_path")
+        if source_path in rebased_paths:
+            track["source_path"] = rebased_paths[source_path]
+    metadata["dataset_root"] = current_root
 
 
 def indent_xml(elem, level=0):
@@ -255,7 +302,9 @@ def read_tracking_xml(xml_file):
             track["timepoints"].append(timepoint)
         tracks.append(track)
 
-    return {"metadata": metadata, "classes": classes, "box_types": box_types, "tracks": tracks}
+    tracking_data = {"metadata": metadata, "classes": classes, "box_types": box_types, "tracks": tracks}
+    _rebase_moved_project_paths(tracking_data, xml_file)
+    return tracking_data
 
 
 def write_tracking_data(output_file, tracking_data):

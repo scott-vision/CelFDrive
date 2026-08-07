@@ -14,6 +14,7 @@ BOX_COLORS = {
     "original": "#33aa33",
     "otsu": "#ff9933",
     "sam2": "#3399ff",
+    "yolo11_tightened": "#8844dd",
     "tightened": "#cc33cc",
 }
 
@@ -129,6 +130,7 @@ class TrackingReviewUI:
         self.show_box_type_vars["original"] = tk.BooleanVar(value=False)
         self.show_box_type_vars["otsu"] = tk.BooleanVar(value=True)
         self.show_box_type_vars["sam2"] = tk.BooleanVar(value=True)
+        self.show_box_type_vars["yolo11_tightened"] = tk.BooleanVar(value=True)
         self.show_box_type_vars["tightened"] = tk.BooleanVar(value=True)
         tk.Checkbutton(
             self.filter_button_frame,
@@ -140,6 +142,12 @@ class TrackingReviewUI:
             self.filter_button_frame,
             text="Otsu",
             variable=self.show_box_type_vars["otsu"],
+            command=self.render_current_track,
+        ).pack(side=tk.LEFT, padx=4)
+        tk.Checkbutton(
+            self.filter_button_frame,
+            text="YOLO11",
+            variable=self.show_box_type_vars["yolo11_tightened"],
             command=self.render_current_track,
         ).pack(side=tk.LEFT, padx=4)
         tk.Checkbutton(
@@ -167,6 +175,11 @@ class TrackingReviewUI:
             self.bulk_button_frame,
             text="All Otsu",
             command=lambda: self.set_all_preferred_box_type("otsu"),
+        ).pack(side=tk.LEFT, padx=4)
+        tk.Button(
+            self.bulk_button_frame,
+            text="All YOLO11",
+            command=lambda: self.set_all_preferred_box_type("yolo11_tightened"),
         ).pack(side=tk.LEFT, padx=4)
         tk.Button(
             self.bulk_button_frame,
@@ -218,6 +231,7 @@ class TrackingReviewUI:
         self.root.bind("<Return>", self._on_return_key)
         self.root.bind("<n>", lambda _: None if self._entry_has_focus() else self.next_track())
         self.root.bind("<o>", lambda _: None if self._entry_has_focus() else self.set_all_preferred_box_type("otsu"))
+        self.root.bind("<y>", lambda _: None if self._entry_has_focus() else self.set_all_preferred_box_type("yolo11_tightened"))
         self.root.bind("<p>", lambda _: None if self._entry_has_focus() else self.prev_track())
         self.root.bind("<f>", lambda _: None if self._entry_has_focus() or self.sam2_points_mode else self.start_sam2_points_mode())
         self.root.bind("<s>", lambda _: None if self._entry_has_focus() else self.save_tracking_xml())

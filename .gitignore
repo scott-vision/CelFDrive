@@ -16,6 +16,12 @@ tmp/
 .DS_Store
 sam2_*.pt
 
+# Generated mitotic-tightener datasets, training runs, and downloaded weights
+Models/tightener_datasets/
+Models/tightener_runs/
+runs/
+yolo11n.pt
+
 # Dataset-project outputs created by the annotation suite
 **/aggregated_tracking.xml
 **/tracking_review.xml

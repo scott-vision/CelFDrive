@@ -27,6 +27,12 @@ project/
 existing projects. The GUI creates `user_selections/` when phase annotations
 are first saved.
 
+Projects may be moved as a complete folder. When `tracking_review.xml` still
+contains paths below its former `dataset_root/images/` directory, CelFDrive
+resolves those image-relative paths below the moved project's current
+`images/` directory. The repaired paths and dataset root are persisted the
+next time the tracking XML is saved.
+
 ## Tracking review
 
 After aggregating phase selections, **Build Tracking XML** creates
@@ -34,9 +40,10 @@ After aggregating phase selections, **Build Tracking XML** creates
 tracks retain their identity and chronological timepoints, each with an image
 path, phase/class, and one or more normalized YOLO-format box variants.
 
-The review editor lets users select the preferred variant and edit boxes. Otsu
-and SAM2 create additional variants (`otsu` and `sam2`) rather than replacing
-the original annotation; manual refinement uses `tightened`.
+The review editor lets users select the preferred variant and edit boxes. Otsu,
+SAM2, and the trained YOLO11 mitotic tightener create additional variants
+(`otsu`, `sam2`, and `yolo11_tightened`) rather than replacing the original
+annotation; manual refinement uses `tightened`.
 
 ## Export and training
 
@@ -51,6 +58,32 @@ each selected project and a dataset YAML at the location chosen by the user.
 SAM2 and training require the optional `ultralytics` dependency; SAM2 also
 requires a compatible CPU or CUDA PyTorch installation. Model weights and
 datasets are never bundled with this repository.
+
+## Mitotic tightener
+
+**Train Mitotic Tightener** accepts explicit project-folder lists for train,
+validation, and held-out test splits. It creates class-agnostic, review-style
+crops around every original box and labels each crop with its preferred review
+box. Datasets are written beneath `Models/tightener_datasets/`; the input size
+is selected from the largest crop, rounded to the YOLO stride and capped at
+320 pixels. The window reports per-epoch validation output and evaluates the
+best checkpoint on the test split after training.
+
+Each generated dataset includes `training_manifest.csv`, which records every
+included or skipped timepoint, its source project and image, selected preferred
+box, review-crop bounds, output crop/label paths, and any skip reason.
+
+To use a trained model in a project, select **Configure Tightener** in the
+project GUI and choose its `best.pt`. The path is saved in that project's
+`tracking_review.xml`, together with the model's training image size, so
+inference uses the same Ultralytics input resolution. **Run YOLO11 Tightener** then writes a
+`yolo11_tightened` alternative for each timepoint. If it cannot detect a box,
+it records an original-box fallback so every timepoint still has a selectable
+variant. When several boxes are detected, CelFDrive selects the one with the
+highest confidence that contains the original prompt-box centre by default. If
+none contain that centre, it uses greatest overlap with the original prompt
+box. **Configure Tightener** can persistently select pure overlap or confidence
+selection for a project.
 
 ## Legacy commands
 
