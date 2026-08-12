@@ -41,7 +41,7 @@ tracks retain their identity and chronological timepoints, each with an image
 path, phase/class, and one or more normalized YOLO-format box variants.
 
 The review editor lets users select the preferred variant and edit boxes. Otsu,
-SAM2, and the trained YOLO11 mitotic tightener create additional variants
+SAM2, and the trained YOLO11 cell tightener create additional variants
 (`otsu`, `sam2`, and `yolo11_tightened`) rather than replacing the original
 annotation; manual refinement uses `tightened`.
 
@@ -59,15 +59,23 @@ SAM2 and training require the optional `ultralytics` dependency; SAM2 also
 requires a compatible CPU or CUDA PyTorch installation. Model weights and
 datasets are never bundled with this repository.
 
-## Mitotic tightener
+## Cell tightener
 
-**Train Mitotic Tightener** accepts explicit project-folder lists for train,
+**Train Cell Tightener** accepts explicit project-folder lists for train,
 validation, and held-out test splits. It creates class-agnostic, review-style
 crops around every original box and labels each crop with its preferred review
-box. Datasets are written beneath `Models/tightener_datasets/`; the input size
+box. By default, datasets and training runs are written beneath
+`D:\Scott\home\Brook\TrainingData\cell_tightener\` (override with the
+`CELLCLICKER_TIGHTENER_STORAGE_ROOT` environment variable); the input size
 is selected from the largest crop, rounded to the YOLO stride and capped at
 320 pixels. The window reports per-epoch validation output and evaluates the
 best checkpoint on the test split after training.
+
+Enable **Train with phase classes** to train a multiclass tightener using the
+same phase classes shown in Tracking Review. All selected projects must have
+the same ordered tracking class map. A multiclass YOLO11 box whose predicted
+phase differs from the timepoint dropdown displays a red `pred: <class>` label
+in review; it is informational and never changes the selected class.
 
 Each generated dataset includes `training_manifest.csv`, which records every
 included or skipped timepoint, its source project and image, selected preferred

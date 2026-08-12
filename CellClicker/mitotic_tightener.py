@@ -1,11 +1,12 @@
-"""Train and apply a local YOLO11 mitotic bounding-box tightener.
+"""Train and apply a local YOLO11 cell bounding-box tightener.
 
 The detector sees the same contextual crop used by the tracking-review UI.  It
-learns one class (``mitosis``) and maps its crop-local prediction back to a
+learns one class (``cell``) and maps its crop-local prediction back to a
 normalized full-image tracking box.
 """
 
 import csv
+import json
 import os
 import shutil
 import tempfile
@@ -22,15 +23,25 @@ TIGHTENER_BOX_TYPE = "yolo11_tightened"
 TIGHTENER_MODEL_METADATA_KEY = "mitotic_tightener_weights"
 TIGHTENER_IMGSZ_METADATA_KEY = "mitotic_tightener_imgsz"
 TIGHTENER_SELECTION_METADATA_KEY = "mitotic_tightener_selection"
+TIGHTENER_CLASS_MODE_METADATA_KEY = "mitotic_tightener_class_mode"
+TIGHTENER_CLASS_MAPPING_METADATA_KEY = "mitotic_tightener_class_mapping"
+MODEL_METADATA_FILENAME = "mitotic_tightener_model.json"
 DEFAULT_TIGHTENER_SELECTION = "center_confidence"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+DEFAULT_TIGHTENER_STORAGE_ROOT = os.environ.get(
+    "CELLCLICKER_TIGHTENER_STORAGE_ROOT",
+    r"D:\Scott\home\Brook\TrainingData\cell_tightener",
+)
+DEFAULT_TIGHTENER_DATASETS_ROOT = os.path.join(DEFAULT_TIGHTENER_STORAGE_ROOT, "datasets")
+DEFAULT_TIGHTENER_RUNS_ROOT = os.path.join(DEFAULT_TIGHTENER_STORAGE_ROOT, "runs")
+DEFAULT_TIGHTENER_MODELS_ROOT = os.path.join(DEFAULT_TIGHTENER_STORAGE_ROOT, "models")
 
 
 def _ensure_ultralytics():
     try:
         from ultralytics import YOLO
     except ImportError as exc:
-        raise ImportError("Ultralytics is required for mitotic tightener training and inference.") from exc
+        raise ImportError("Ultralytics is required for cell tightener training and inference.") from exc
     return YOLO
 
 
@@ -130,8 +141,8 @@ def _select_prediction_by_center_confidence(predictions, original_box, image_siz
     return _select_prediction_by_original_overlap(predictions, original_box, image_size, crop_bounds)
 
 
-def crop_label_from_boxes(image_size, original_box, preferred_box):
-    """Return review crop bounds and one class-agnostic crop-local YOLO label."""
+def crop_label_from_boxes(image_size, original_box, preferred_box, yolo_class_id=0):
+    """Return review crop bounds and one crop-local YOLO label."""
     crop_x1, crop_y1, crop_x2, crop_y2 = review_crop_bounds(image_size, original_box)
     target_x1, target_y1, target_x2, target_y2 = _box_xyxy(preferred_box, image_size)
     crop_width, crop_height = crop_x2 - crop_x1, crop_y2 - crop_y1
@@ -143,7 +154,7 @@ def crop_label_from_boxes(image_size, original_box, preferred_box):
     height = (target_y2 - target_y1) / crop_height
     if not (0 < width <= 1 and 0 < height <= 1):
         raise ValueError("Preferred box has invalid crop-relative dimensions.")
-    return (crop_x1, crop_y1, crop_x2, crop_y2), f"0 {center_x:.8f} {center_y:.8f} {width:.8f} {height:.8f}"
+    return (crop_x1, crop_y1, crop_x2, crop_y2), f"{int(yolo_class_id)} {center_x:.8f} {center_y:.8f} {width:.8f} {height:.8f}"
 
 
 def _project_tracking_path(project_dir):
@@ -151,6 +162,26 @@ def _project_tracking_path(project_dir):
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Tightener project `{project_dir}` is missing `user_selections/tracking_review.xml`.")
     return path
+
+
+def _class_mapping_for_projects(project_dirs, class_aware):
+    """Return stable YOLO-to-tracking class metadata for selected projects."""
+    if not class_aware:
+        return "single", [{"yolo_class_id": 0, "tracking_class_id": None, "name": "cell"}]
+    expected_classes = None
+    for project_dir in project_dirs:
+        classes = read_tracking_xml(_project_tracking_path(project_dir)).get("classes", {})
+        ordered = [(int(class_id), str(name)) for class_id, name in sorted(classes.items())]
+        if not ordered:
+            raise ValueError(f"Multiclass tightener project `{project_dir}` has no tracking class map.")
+        if expected_classes is None:
+            expected_classes = ordered
+        elif ordered != expected_classes:
+            raise ValueError("Multiclass tightener projects must share one identical ordered tracking class map.")
+    return "multiclass", [
+        {"yolo_class_id": index, "tracking_class_id": class_id, "name": name}
+        for index, (class_id, name) in enumerate(expected_classes or [])
+    ]
 
 
 def summarise_projects(project_dirs):
@@ -199,13 +230,15 @@ def _validate_distinct_splits(train_dirs, val_dirs, test_dirs):
             seen[normalised] = split_name
 
 
-def _write_yaml(dataset_dir):
+def _write_yaml(dataset_dir, class_mapping):
     yaml_path = os.path.join(dataset_dir, "dataset.yaml")
     with open(yaml_path, "w", encoding="utf-8") as handle:
         for split in ("train", "val", "test"):
             image_dir = os.path.join(dataset_dir, "images", split).replace("\\", "/")
             handle.write(f"{split}: {image_dir}\n")
-        handle.write("nc: 1\nnames:\n  0: mitosis\n")
+        handle.write(f"nc: {len(class_mapping)}\nnames:\n")
+        for item in class_mapping:
+            handle.write(f"  {item['yolo_class_id']}: {item['name']}\n")
     return yaml_path
 
 
@@ -213,6 +246,7 @@ MANIFEST_FIELDS = [
     "split", "project_dir", "tracking_xml", "track_id", "timepoint_index", "image_path",
     "original_box_type", "preferred_box_type", "crop_x1", "crop_y1", "crop_x2", "crop_y2",
     "yolo_label", "crop_path", "label_path", "status", "skip_reason",
+    "target_tracking_class_id", "target_yolo_class_id", "target_class_name",
 ]
 
 
@@ -224,11 +258,14 @@ def _write_manifest(manifest_path, rows):
         writer.writerows(rows)
 
 
-def prepare_tightener_dataset(train_dirs, val_dirs, test_dirs, dataset_dir, progress_callback=None):
+def prepare_tightener_dataset(train_dirs, val_dirs, test_dirs, dataset_dir, progress_callback=None, class_aware=False):
     """Create a self-contained crop dataset and return split counts and image size."""
     if not train_dirs or not val_dirs or not test_dirs:
         raise ValueError("Add at least one project folder to each train, validation, and test split.")
     _validate_distinct_splits(train_dirs, val_dirs, test_dirs)
+    class_mode, class_mapping = _class_mapping_for_projects(train_dirs + val_dirs + test_dirs, class_aware)
+    yolo_class_by_tracking_id = {item["tracking_class_id"]: item["yolo_class_id"] for item in class_mapping}
+    class_name_by_tracking_id = {item["tracking_class_id"]: item["name"] for item in class_mapping}
     dataset_dir = _normalise_path(dataset_dir)
     if os.path.exists(dataset_dir):
         raise FileExistsError(f"Tightener dataset directory already exists: `{dataset_dir}`.")
@@ -261,6 +298,7 @@ def prepare_tightener_dataset(train_dirs, val_dirs, test_dirs, dataset_dir, prog
                             "preferred_box_type": timepoint.get("preferred_box_type"), "crop_x1": "", "crop_y1": "",
                             "crop_x2": "", "crop_y2": "", "yolo_label": "", "crop_path": "", "label_path": "",
                             "status": "skipped", "skip_reason": "",
+                            "target_tracking_class_id": "", "target_yolo_class_id": "", "target_class_name": "",
                         }
                         try:
                             original_box = _find_box(timepoint, "original")
@@ -268,8 +306,12 @@ def prepare_tightener_dataset(train_dirs, val_dirs, test_dirs, dataset_dir, prog
                             image_path = _normalise_path(timepoint["image_path"])
                             if original_box is None or preferred_box is None:
                                 raise ValueError("Missing source or target box")
+                            tracking_class_id = int(timepoint["class_id"])
+                            if class_mode == "multiclass" and tracking_class_id not in yolo_class_by_tracking_id:
+                                raise ValueError(f"Class {tracking_class_id} is not in the multiclass mapping")
+                            yolo_class_id = yolo_class_by_tracking_id.get(tracking_class_id, 0)
                             with Image.open(image_path) as image:
-                                crop_bounds, label = crop_label_from_boxes(image.size, original_box, preferred_box)
+                                crop_bounds, label = crop_label_from_boxes(image.size, original_box, preferred_box, yolo_class_id)
                                 crop = image.crop(crop_bounds)
                                 max_crop_side = max(max_crop_side, *crop.size)
                                 filename = f"{split}_{example_index:06d}.png"
@@ -283,6 +325,9 @@ def prepare_tightener_dataset(train_dirs, val_dirs, test_dirs, dataset_dir, prog
                                 "crop_x2": crop_bounds[2], "crop_y2": crop_bounds[3], "yolo_label": label,
                                 "crop_path": os.path.relpath(crop_path, staging_dir).replace("\\", "/"),
                                 "label_path": os.path.relpath(label_path, staging_dir).replace("\\", "/"), "status": "included",
+                                "target_tracking_class_id": tracking_class_id if class_mode == "multiclass" else "",
+                                "target_yolo_class_id": yolo_class_id,
+                                "target_class_name": class_name_by_tracking_id.get(tracking_class_id, "cell"),
                             })
                             example_index += 1
                             current += 1
@@ -294,14 +339,15 @@ def prepare_tightener_dataset(train_dirs, val_dirs, test_dirs, dataset_dir, prog
         _write_manifest(os.path.join(staging_dir, "training_manifest.csv"), manifest_rows)
         os.makedirs(os.path.dirname(dataset_dir), exist_ok=True)
         os.replace(staging_dir, dataset_dir)
-        _write_yaml(dataset_dir)
+        _write_yaml(dataset_dir, class_mapping)
     except Exception:
         if os.path.isdir(staging_dir):
             shutil.rmtree(staging_dir)
         raise
     return {"dataset_dir": dataset_dir, "yaml_path": os.path.join(dataset_dir, "dataset.yaml"),
             "manifest_path": os.path.join(dataset_dir, "training_manifest.csv"), "splits": summaries,
-            "imgsz": recommended_imgsz(max_crop_side), "max_crop_side": max_crop_side}
+            "imgsz": recommended_imgsz(max_crop_side), "max_crop_side": max_crop_side,
+            "class_mode": class_mode, "class_mapping": class_mapping}
 
 
 def _read_last_results_row(path):
@@ -311,17 +357,68 @@ def _read_last_results_row(path):
         return next(reversed(list(csv.DictReader(handle))), {})
 
 
-def train_tightener_model(train_dirs, val_dirs, test_dirs, dataset_dir, output_root, run_name, epochs, batch, patience, device, progress_callback=None, epoch_callback=None, dataset_callback=None):
+def _write_model_metadata(run_dir, dataset_info):
+    """Write class provenance beside weights for later project configuration."""
+    os.makedirs(run_dir, exist_ok=True)
+    metadata_path = os.path.join(run_dir, MODEL_METADATA_FILENAME)
+    with open(metadata_path, "w", encoding="utf-8") as handle:
+        json.dump(
+            {"class_mode": dataset_info["class_mode"], "class_mapping": dataset_info["class_mapping"], "imgsz": dataset_info["imgsz"]},
+            handle,
+            indent=2,
+        )
+    return metadata_path
+
+
+def _read_model_metadata(weights_path):
+    """Read tightener provenance stored beside an in-project ``best.pt``."""
+    metadata_path = os.path.join(os.path.dirname(os.path.dirname(weights_path)), MODEL_METADATA_FILENAME)
+    if not os.path.isfile(metadata_path):
+        return None
+    # PowerShell's UTF-8 output may include a BOM; accept both UTF-8 variants.
+    with open(metadata_path, encoding="utf-8-sig") as handle:
+        metadata = json.load(handle)
+    class_mode = metadata.get("class_mode")
+    class_mapping = metadata.get("class_mapping")
+    if class_mode not in {"single", "multiclass"} or not isinstance(class_mapping, list):
+        raise ValueError(f"Tightener model metadata `{metadata_path}` is invalid.")
+    if class_mode == "multiclass" and not class_mapping:
+        raise ValueError(f"Tightener model metadata `{metadata_path}` has no multiclass mapping.")
+    return metadata
+
+
+def _legacy_single_model_metadata(weights_path):
+    """Recognise earlier one-class tightener runs that predate provenance JSON."""
+    args_path = os.path.join(os.path.dirname(os.path.dirname(weights_path)), "args.yaml")
+    if not os.path.isfile(args_path):
+        return None
+    dataset_path = None
+    with open(args_path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("data:"):
+                dataset_path = line.split(":", 1)[1].strip().strip("'\"")
+                break
+    if not dataset_path or not os.path.isfile(dataset_path):
+        return None
+    with open(dataset_path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("nc:") and line.split(":", 1)[1].strip() == "1":
+                return {"class_mode": "single", "class_mapping": [{"yolo_class_id": 0, "tracking_class_id": None, "name": "cell"}]}
+    return None
+
+
+def train_tightener_model(train_dirs, val_dirs, test_dirs, dataset_dir, output_root, run_name, epochs, batch, patience, device, progress_callback=None, epoch_callback=None, dataset_callback=None, class_aware=False):
     """Prepare crops, train YOLO11n, then evaluate its best checkpoint on test."""
     YOLO = _ensure_ultralytics()
-    dataset_info = prepare_tightener_dataset(train_dirs, val_dirs, test_dirs, dataset_dir, progress_callback)
+    dataset_info = prepare_tightener_dataset(train_dirs, val_dirs, test_dirs, dataset_dir, progress_callback, class_aware=class_aware)
     if dataset_callback:
         dataset_callback(dataset_info)
     output_root = _normalise_path(output_root)
     run_dir = os.path.join(output_root, run_name)
     if os.path.exists(run_dir):
         raise FileExistsError(f"Tightener training run already exists: `{run_dir}`.")
-    model = YOLO("yolo11n.pt")
+    os.makedirs(DEFAULT_TIGHTENER_MODELS_ROOT, exist_ok=True)
+    model = YOLO(os.path.join(DEFAULT_TIGHTENER_MODELS_ROOT, "yolo11n.pt"))
     if epoch_callback:
         def report_epoch(trainer):
             metrics = getattr(trainer, "metrics", {}) or {}
@@ -331,11 +428,13 @@ def train_tightener_model(train_dirs, val_dirs, test_dirs, dataset_dir, output_r
                           batch=batch, epochs=epochs, patience=patience, device=device)
     save_dir = _normalise_path(str(getattr(results, "save_dir", None) or getattr(getattr(model, "trainer", None), "save_dir", run_dir)))
     best_weights = os.path.join(save_dir, "weights", "best.pt")
+    model_metadata_path = _write_model_metadata(save_dir, dataset_info)
     test_model = YOLO(best_weights)
     test_results = test_model.val(data=dataset_info["yaml_path"], split="test", imgsz=dataset_info["imgsz"], device=device)
     return {"dataset_info": dataset_info, "run_dir": save_dir, "best_weights": best_weights,
             "last_weights": os.path.join(save_dir, "weights", "last.pt"), "validation_metrics": _read_last_results_row(os.path.join(save_dir, "results.csv")),
-            "test_metrics": dict(getattr(test_results, "results_dict", {}) or {}), "timestamp": datetime.now().isoformat(timespec="seconds")}
+            "test_metrics": dict(getattr(test_results, "results_dict", {}) or {}), "model_metadata_path": model_metadata_path,
+            "timestamp": datetime.now().isoformat(timespec="seconds")}
 
 
 def configure_tightener_weights(tracking_xml_path, weights_path, selection_strategy=DEFAULT_TIGHTENER_SELECTION):
@@ -345,11 +444,25 @@ def configure_tightener_weights(tracking_xml_path, weights_path, selection_strat
         raise FileNotFoundError(f"Tightener weights do not exist: `{weights_path}`.")
     if selection_strategy not in {"center_confidence", "overlap", "confidence"}:
         raise ValueError("Tightener selection strategy must be `center_confidence`, `overlap`, or `confidence`.")
+    model_metadata = _read_model_metadata(weights_path) or _legacy_single_model_metadata(weights_path)
+    if model_metadata is None:
+        raise ValueError(
+            "Tightener weights are missing model provenance. Configure only weights produced by Cell Tightener Training."
+        )
     data = read_tracking_xml(tracking_xml_path)
+    if model_metadata["class_mode"] == "multiclass":
+        project_mapping = [
+            {"yolo_class_id": index, "tracking_class_id": int(class_id), "name": str(name)}
+            for index, (class_id, name) in enumerate(sorted(data.get("classes", {}).items()))
+        ]
+        if project_mapping != model_metadata["class_mapping"]:
+            raise ValueError("Multiclass tightener weights do not match this project's tracking class map.")
     metadata = data.setdefault("metadata", {})
     metadata[TIGHTENER_MODEL_METADATA_KEY] = weights_path
-    metadata[TIGHTENER_IMGSZ_METADATA_KEY] = str(_trained_model_imgsz(weights_path))
+    metadata[TIGHTENER_IMGSZ_METADATA_KEY] = str(model_metadata.get("imgsz", _trained_model_imgsz(weights_path)))
     metadata[TIGHTENER_SELECTION_METADATA_KEY] = selection_strategy
+    metadata[TIGHTENER_CLASS_MODE_METADATA_KEY] = model_metadata["class_mode"]
+    metadata[TIGHTENER_CLASS_MAPPING_METADATA_KEY] = json.dumps(model_metadata["class_mapping"])
     write_tracking_data(tracking_xml_path, data)
 
 
@@ -358,17 +471,27 @@ def run_tightener_on_tracking_xml(tracking_xml_path, overwrite=True, confidence=
     data = read_tracking_xml(tracking_xml_path)
     weights_path = data.get("metadata", {}).get(TIGHTENER_MODEL_METADATA_KEY)
     if not weights_path:
-        raise ValueError("Configure Mitotic Tightener Model before running the tightener.")
+        raise ValueError("Configure Cell Tightener Model before running the tightener.")
     if not os.path.isfile(weights_path):
         raise FileNotFoundError(f"Configured tightener weights do not exist: `{weights_path}`.")
     imgsz = int(data.get("metadata", {}).get(TIGHTENER_IMGSZ_METADATA_KEY, _trained_model_imgsz(weights_path)))
     if imgsz <= 0:
-        raise ValueError("Configured mitotic tightener image size must be positive.")
+        raise ValueError("Configured cell tightener image size must be positive.")
     selection_strategy = data.get("metadata", {}).get(TIGHTENER_SELECTION_METADATA_KEY, DEFAULT_TIGHTENER_SELECTION)
     if selection_strategy not in {"center_confidence", "overlap", "confidence"}:
-        raise ValueError("Configured mitotic tightener selection strategy must be `center_confidence`, `overlap`, or `confidence`.")
+        raise ValueError("Configured cell tightener selection strategy must be `center_confidence`, `overlap`, or `confidence`.")
+    class_mode = data.get("metadata", {}).get(TIGHTENER_CLASS_MODE_METADATA_KEY, "single")
+    if class_mode not in {"single", "multiclass"}:
+        raise ValueError("Configured cell tightener class mode must be `single` or `multiclass`.")
+    try:
+        class_mapping = json.loads(data.get("metadata", {}).get(TIGHTENER_CLASS_MAPPING_METADATA_KEY, "[]"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("Configured cell tightener class mapping is invalid.") from exc
+    class_by_yolo_id = {int(item["yolo_class_id"]): item for item in class_mapping}
+    if class_mode == "multiclass" and not class_by_yolo_id:
+        raise ValueError("Configured multiclass tightener has no class mapping.")
     model = _ensure_ultralytics()(weights_path)
-    data.setdefault("box_types", {})[TIGHTENER_BOX_TYPE] = "Box adjusted by a trained YOLO11 mitotic tightener."
+    data.setdefault("box_types", {})[TIGHTENER_BOX_TYPE] = "Box adjusted by a trained YOLO11 cell tightener."
     timepoints = [point for track in data.get("tracks", []) for point in track.get("timepoints", [])]
     stats = {"timepoints": len(timepoints), "created": 0, "updated": 0, "fallback_original": 0, "skipped_existing": 0, "failed": 0}
     for index, timepoint in enumerate(timepoints, start=1):
@@ -425,6 +548,12 @@ def run_tightener_on_tracking_xml(tracking_xml_path, overwrite=True, confidence=
                            "x_center": ((full_x1 + full_x2) / 2) / image_width, "y_center": ((full_y1 + full_y2) / 2) / image_height,
                            "width": (full_x2 - full_x1) / image_width, "height": (full_y2 - full_y1) / image_height,
                            "source": f"yolo11_tightener:{weights_path}"}
+                    if class_mode == "multiclass":
+                        predicted_class = class_by_yolo_id.get(int(predicted[5]))
+                        if predicted_class is None:
+                            raise ValueError("Tightener prediction returned a class outside its configured mapping.")
+                        box["predicted_class_id"] = int(predicted_class["tracking_class_id"])
+                        box["predicted_class_name"] = str(predicted_class["name"])
             if existing:
                 timepoint["boxes"][timepoint["boxes"].index(existing)] = box
                 stats["updated"] += 1

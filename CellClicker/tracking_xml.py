@@ -21,7 +21,7 @@ DEFAULT_BOX_TYPES = {
     "original": "Box carried forward from the original CellClicker series annotation.",
     "otsu": "Box adjusted by Otsu thresholding.",
     "sam2": "Box adjusted by SAM2.",
-    "yolo11_tightened": "Box adjusted by a trained YOLO11 mitotic tightener.",
+    "yolo11_tightened": "Box adjusted by a trained YOLO11 cell tightener.",
     "tightened": "Box manually tightened by a user.",
 }
 
@@ -194,6 +194,10 @@ def append_track(root, track):
             box_elem.set("height", str(box["height"]))
             if "source" in box:
                 box_elem.set("source", str(box["source"]))
+            if box.get("predicted_class_id") is not None:
+                box_elem.set("predicted_class_id", str(box["predicted_class_id"]))
+            if box.get("predicted_class_name") is not None:
+                box_elem.set("predicted_class_name", str(box["predicted_class_name"]))
 
     return track_elem
 
@@ -297,6 +301,11 @@ def read_tracking_xml(xml_file):
                             "width": float(box_elem.get("width")),
                             "height": float(box_elem.get("height")),
                             "source": box_elem.get("source"),
+                            "predicted_class_id": (
+                                int(box_elem.get("predicted_class_id"))
+                                if box_elem.get("predicted_class_id") is not None else None
+                            ),
+                            "predicted_class_name": box_elem.get("predicted_class_name"),
                         }
                     )
             track["timepoints"].append(timepoint)

@@ -16,6 +16,7 @@ from .tracking_export import export_tracking_xml_to_coco, export_tracking_xml_to
 from .tracking_sam2 import DEFAULT_SAM2_DEVICE, DEFAULT_SAM2_MODEL, run_sam2_on_tracking_xml
 from .mitotic_tightener import (
     DEFAULT_TIGHTENER_SELECTION,
+    DEFAULT_TIGHTENER_MODELS_ROOT,
     TIGHTENER_SELECTION_METADATA_KEY,
     configure_tightener_weights,
     run_tightener_on_tracking_xml,
@@ -120,8 +121,8 @@ class ProjectGUI:
         stage3.pack(fill=tk.X, pady=(0, 10))
         tk.Button(stage3, text="Apply Otsu", command=self.apply_otsu, width=24).pack(side=tk.LEFT, padx=8, pady=8)
         tk.Button(stage3, text="Run SAM/SAM2", command=self.run_sam2, width=24).pack(side=tk.LEFT, padx=8, pady=8)
-        tk.Button(stage3, text="Configure Tightener", command=self.configure_tightener, width=24).pack(side=tk.LEFT, padx=8, pady=8)
-        tk.Button(stage3, text="Run YOLO11 Tightener", command=self.run_tightener, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        tk.Button(stage3, text="Configure Cell Tightener", command=self.configure_tightener, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        tk.Button(stage3, text="Run YOLO11 Cell Tightener", command=self.run_tightener, width=24).pack(side=tk.LEFT, padx=8, pady=8)
 
         stage4 = tk.LabelFrame(right, text="4. Review")
         stage4.pack(fill=tk.X, pady=(0, 10))
@@ -139,7 +140,7 @@ class ProjectGUI:
         stage6 = tk.LabelFrame(right, text="Notes")
         stage6.pack(fill=tk.X, pady=(0, 10))
         tk.Button(stage6, text="Open YOLO Training", command=self.open_yolo_training, width=24).pack(side=tk.LEFT, padx=8, pady=8)
-        tk.Button(stage6, text="Train Mitotic Tightener", command=self.open_tightener_training, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        tk.Button(stage6, text="Train Cell Tightener", command=self.open_tightener_training, width=24).pack(side=tk.LEFT, padx=8, pady=8)
 
         stage7 = tk.LabelFrame(right, text="Notes")
         stage7.pack(fill=tk.BOTH, expand=True)
@@ -524,7 +525,7 @@ class ProjectGUI:
             messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.", parent=self.root)
             return
         weights_path = filedialog.askopenfilename(
-            title="Select Mitotic Tightener best.pt", initialdir=os.path.join(os.getcwd(), "Models"),
+            title="Select Cell Tightener best.pt", initialdir=DEFAULT_TIGHTENER_MODELS_ROOT,
             filetypes=[("PyTorch weights", "*.pt"), ("All files", "*.*")], parent=self.root,
         )
         if not weights_path:
@@ -551,7 +552,7 @@ class ProjectGUI:
         except Exception as exc:
             messagebox.showerror("Configure Tightener", str(exc), parent=self.root)
             return
-        self.status_var.set(f"Configured mitotic tightener ({selection_strategy} selection): {weights_path}")
+        self.status_var.set(f"Configured cell tightener ({selection_strategy} selection): {weights_path}")
 
     def run_tightener(self):
         if not self._require_project():
@@ -562,16 +563,16 @@ class ProjectGUI:
             return
         try:
             stats = self._run_with_progress_dialog(
-                "Running YOLO11 Tightener", "Generating trained tightener box variants...",
+                "Running YOLO11 Cell Tightener", "Generating trained cell-tightener box variants...",
                 lambda progress_callback: run_tightener_on_tracking_xml(tracking_xml, progress_callback=progress_callback),
             )
         except Exception as exc:
-            LOGGER.exception("Mitotic tightener failed for `%s`.", tracking_xml)
-            messagebox.showerror("YOLO11 Tightener Failed", str(exc), parent=self.root)
-            self.status_var.set("YOLO11 tightener failed.")
+            LOGGER.exception("Cell tightener failed for `%s`.", tracking_xml)
+            messagebox.showerror("YOLO11 Cell Tightener Failed", str(exc), parent=self.root)
+            self.status_var.set("YOLO11 cell tightener failed.")
             return
         self.status_var.set(
-            f"YOLO11 tightener completed. Created {stats['created']}, updated {stats['updated']}, "
+            f"YOLO11 cell tightener completed. Created {stats['created']}, updated {stats['updated']}, "
             f"original fallbacks {stats['fallback_original']}, failed {stats['failed']}."
         )
         messagebox.showinfo("YOLO11 Tightener Complete", "\n".join(f"{key}: {value}" for key, value in stats.items()), parent=self.root)

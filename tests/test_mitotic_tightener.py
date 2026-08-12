@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import numpy as np
 from PIL import Image
@@ -7,6 +8,8 @@ import pytest
 from CellClicker.mitotic_tightener import (
     TIGHTENER_BOX_TYPE,
     TIGHTENER_IMGSZ_METADATA_KEY,
+    TIGHTENER_CLASS_MAPPING_METADATA_KEY,
+    TIGHTENER_CLASS_MODE_METADATA_KEY,
     TIGHTENER_SELECTION_METADATA_KEY,
     _select_prediction_by_center_confidence,
     TIGHTENER_MODEL_METADATA_KEY,
@@ -25,7 +28,7 @@ def _box(kind, x=0.5, y=0.5, width=0.2, height=0.2):
     return {"box_type": kind, "format": "yolo_xywh_norm", "x_center": x, "y_center": y, "width": width, "height": height}
 
 
-def _project(tmp_path, name, preferred="otsu"):
+def _project(tmp_path, name, preferred="otsu", classes=None):
     project = tmp_path / name
     image_path = project / "images" / "frame.png"
     image_path.parent.mkdir(parents=True)
@@ -35,7 +38,7 @@ def _project(tmp_path, name, preferred="otsu"):
              "boxes": [_box("original"), _box("otsu", x=.45, y=.5, width=.1, height=.1)]}
     track = {"track_id": "T1", "source_path": str(image_path), "series_id": "1", "timepoints": [point]}
     xml_path = project / "user_selections" / "tracking_review.xml"
-    write_tracking_xml(xml_path, [track], metadata={"dataset_root": str(project)})
+    write_tracking_xml(xml_path, [track], classes=classes, metadata={"dataset_root": str(project)})
     return project, xml_path
 
 
@@ -62,6 +65,21 @@ def test_prepare_dataset_writes_all_splits_and_recommends_compact_size(tmp_path)
     assert recommended_imgsz(321) == 320
     with pytest.raises(ValueError, match="both train and validation"):
         prepare_tightener_dataset([train], [train], [test], tmp_path / "duplicate")
+
+
+def test_multiclass_dataset_uses_tracking_classes_and_rejects_mismatched_maps(tmp_path):
+    classes = {0: "prophase", 3: "metaphase"}
+    train, _ = _project(tmp_path, "train", classes=classes)
+    val, _ = _project(tmp_path, "val", classes=classes)
+    test, _ = _project(tmp_path, "test", classes=classes)
+    result = prepare_tightener_dataset([train], [val], [test], tmp_path / "multiclass", class_aware=True)
+    assert result["class_mode"] == "multiclass"
+    assert result["class_mapping"][1] == {"yolo_class_id": 1, "tracking_class_id": 3, "name": "metaphase"}
+    assert (tmp_path / "multiclass" / "labels" / "train" / "train_000000.txt").read_text().startswith("1 ")
+    assert "1: metaphase" in (tmp_path / "multiclass" / "dataset.yaml").read_text()
+    mismatch, _ = _project(tmp_path, "mismatch", classes={0: "prophase", 3: "other"})
+    with pytest.raises(ValueError, match="identical ordered"):
+        prepare_tightener_dataset([train], [mismatch], [test], tmp_path / "bad", class_aware=True)
 
 
 def test_moved_project_paths_rebase_from_old_dataset_root(tmp_path):
@@ -93,12 +111,14 @@ def test_tightener_training_settings_round_trip_and_validate(tmp_path):
 
 
 def test_configured_model_inference_maps_prediction_and_falls_back(tmp_path, monkeypatch):
-    project, xml_path = _project(tmp_path, "project")
-    weights = tmp_path / "best.pt"; weights.write_bytes(b"weights")
+    project, xml_path = _project(tmp_path, "project", classes={0: "prophase", 3: "metaphase"})
+    run_dir = tmp_path / "run"; weights = run_dir / "weights" / "best.pt"; weights.parent.mkdir(parents=True); weights.write_bytes(b"weights")
+    (run_dir / "mitotic_tightener_model.json").write_text(json.dumps({"class_mode": "single", "class_mapping": [{"yolo_class_id": 0, "tracking_class_id": None, "name": "mitosis"}], "imgsz": 320}), encoding="utf-8-sig")
     configure_tightener_weights(xml_path, weights)
     assert read_tracking_xml(xml_path)["metadata"][TIGHTENER_MODEL_METADATA_KEY] == str(weights)
     assert read_tracking_xml(xml_path)["metadata"][TIGHTENER_IMGSZ_METADATA_KEY] == "320"
     assert read_tracking_xml(xml_path)["metadata"][TIGHTENER_SELECTION_METADATA_KEY] == "center_confidence"
+    assert read_tracking_xml(xml_path)["metadata"][TIGHTENER_CLASS_MODE_METADATA_KEY] == "single"
 
     class Boxes:
         # The higher-confidence candidate is a neighbouring cell; selection
@@ -124,6 +144,26 @@ def test_configured_model_inference_maps_prediction_and_falls_back(tmp_path, mon
     stats = run_tightener_on_tracking_xml(xml_path)
     box = read_tracking_xml(xml_path)["tracks"][0]["timepoints"][0]["boxes"][-1]
     assert stats["fallback_original"] == 1 and box["width"] == pytest.approx(.2)
+
+
+def test_multiclass_inference_persists_prediction_and_review_warning(tmp_path, monkeypatch):
+    from CellClicker.tracking_review_ui import TrackingReviewUI
+    project, xml_path = _project(tmp_path, "project", classes={0: "prophase", 3: "metaphase"})
+    run_dir = tmp_path / "run"; weights = run_dir / "weights" / "best.pt"; weights.parent.mkdir(parents=True); weights.write_bytes(b"weights")
+    mapping = [{"yolo_class_id": 0, "tracking_class_id": 0, "name": "prophase"}, {"yolo_class_id": 1, "tracking_class_id": 3, "name": "metaphase"}]
+    (run_dir / "mitotic_tightener_model.json").write_text(json.dumps({"class_mode": "multiclass", "class_mapping": mapping, "imgsz": 320}), encoding="utf-8")
+    configure_tightener_weights(xml_path, weights)
+    class Boxes: data = np.array([[38, 40, 58, 60, .9, 0]])
+    class Result: boxes = Boxes()
+    class Model:
+        def __call__(self, *args, **kwargs): return [Result()]
+    monkeypatch.setattr("CellClicker.mitotic_tightener._ensure_ultralytics", lambda: lambda _: Model())
+    run_tightener_on_tracking_xml(xml_path)
+    timepoint = read_tracking_xml(xml_path)["tracks"][0]["timepoints"][0]
+    box = timepoint["boxes"][-1]
+    assert box["predicted_class_id"] == 0 and box["predicted_class_name"] == "prophase"
+    assert TrackingReviewUI._predicted_class_warning(timepoint, box) == "pred: prophase"
+    assert timepoint["class_id"] == 3
 
 
 def test_center_confidence_selection_falls_back_to_overlap():

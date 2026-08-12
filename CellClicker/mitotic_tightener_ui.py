@@ -1,4 +1,4 @@
-"""Small Tk interface for building and training mitotic tightener datasets."""
+"""Small Tk interface for building and training cell tightener datasets."""
 
 import json
 import os
@@ -8,7 +8,12 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from .mitotic_tightener import summarise_projects, train_tightener_model
+from .mitotic_tightener import (
+    DEFAULT_TIGHTENER_DATASETS_ROOT,
+    DEFAULT_TIGHTENER_RUNS_ROOT,
+    summarise_projects,
+    train_tightener_model,
+)
 
 
 SETTINGS_FORMAT_VERSION = 1
@@ -49,15 +54,16 @@ class MitoticTightenerTrainingUI:
 
     def __init__(self, root):
         self.root = root
-        root.title("Mitotic Tightener Training")
+        root.title("Cell Tightener Training")
         root.geometry("1060x760")
         self.projects = {"train": [], "val": [], "test": []}
         self.count_vars = {name: tk.StringVar(value=f"{name.title()}: 0 folders, 0 usable, 0 skipped") for name in self.projects}
         self.listboxes = {}
         self.status_var = tk.StringVar(value="Add train, validation, and test project folders.")
-        self.output_var = tk.StringVar(value=os.path.join(os.getcwd(), "Models", "tightener_runs"))
+        self.output_var = tk.StringVar(value=DEFAULT_TIGHTENER_RUNS_ROOT)
         self.name_var = tk.StringVar(value=datetime.now().strftime("tightener_%Y%m%d_%H%M%S"))
         self.epochs_var, self.batch_var, self.patience_var, self.device_var = (tk.StringVar(value=value) for value in ("150", "16", "50", "0"))
+        self.class_aware_var = tk.BooleanVar(value=False)
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_label = tk.StringVar(value="0 / 0")
         self.progress_bar = None
@@ -91,6 +97,9 @@ class MitoticTightenerTrainingUI:
         self._setting(settings, 3, "Batch", self.batch_var)
         self._setting(settings, 4, "Patience", self.patience_var)
         self._setting(settings, 5, "Device", self.device_var)
+        tk.Checkbutton(settings, text="Train with phase classes", variable=self.class_aware_var).grid(
+            row=6, column=1, sticky=tk.W, padx=6, pady=3
+        )
         action = tk.Frame(top); action.pack(fill=tk.X, pady=(0, 8))
         tk.Button(action, text="Refresh Summary", command=self.refresh_counts).pack(side=tk.LEFT)
         tk.Button(action, text="Save Settings", command=self.save_settings).pack(side=tk.LEFT, padx=(8, 0))
@@ -138,12 +147,13 @@ class MitoticTightenerTrainingUI:
             "output_root": self.output_var.get().strip(), "run_name": self.name_var.get().strip(),
             "epochs": self.epochs_var.get().strip(), "batch": self.batch_var.get().strip(),
             "patience": self.patience_var.get().strip(), "device": self.device_var.get().strip(),
+            "class_aware": self.class_aware_var.get(),
         }
 
     def save_settings(self):
         path = filedialog.asksaveasfilename(
-            title="Save Mitotic Tightener Settings", defaultextension=".json",
-            initialfile="mitotic_tightener_settings.json", filetypes=[("JSON settings", "*.json")], parent=self.root,
+            title="Save Cell Tightener Settings", defaultextension=".json",
+            initialfile="cell_tightener_settings.json", filetypes=[("JSON settings", "*.json")], parent=self.root,
         )
         if not path:
             return
@@ -156,7 +166,7 @@ class MitoticTightenerTrainingUI:
 
     def load_settings(self):
         path = filedialog.askopenfilename(
-            title="Load Mitotic Tightener Settings", filetypes=[("JSON settings", "*.json"), ("All files", "*.*")], parent=self.root,
+            title="Load Cell Tightener Settings", filetypes=[("JSON settings", "*.json"), ("All files", "*.*")], parent=self.root,
         )
         if not path:
             return
@@ -176,6 +186,7 @@ class MitoticTightenerTrainingUI:
         self.batch_var.set(str(settings["batch"]))
         self.patience_var.set(str(settings["patience"]))
         self.device_var.set(str(settings["device"]))
+        self.class_aware_var.set(bool(settings.get("class_aware", False)))
         self.refresh_counts()
         self.status_var.set(f"Loaded tightener settings from {path}")
 
@@ -195,7 +206,8 @@ class MitoticTightenerTrainingUI:
         root = os.path.normpath(self.output_var.get().strip())
         return {"output_root": root, "run_name": self.name_var.get().strip(), "epochs": int(self.epochs_var.get()),
                 "batch": int(self.batch_var.get()), "patience": int(self.patience_var.get()), "device": self.device_var.get().strip(),
-                "dataset_dir": os.path.join(os.getcwd(), "Models", "tightener_datasets", self.name_var.get().strip())}
+                "dataset_dir": os.path.join(DEFAULT_TIGHTENER_DATASETS_ROOT, self.name_var.get().strip()),
+                "class_aware": self.class_aware_var.get()}
 
     def start_training(self):
         try:
@@ -225,21 +237,23 @@ class MitoticTightenerTrainingUI:
             elif kind == "epoch":
                 self.status_var.set(f"Training epoch {first} / {second}"); self._append_log(f"Epoch {first}/{second}: {detail}")
             else:
-                self.status_var.set(f"Dataset ready. Training YOLO11n at {first['imgsz']} px...")
+                self.status_var.set(f"Dataset ready. Training {first['class_mode']} YOLO11n at {first['imgsz']} px...")
                 self._append_log(f"Dataset: {first['dataset_dir']}; selected image size: {first['imgsz']} px")
+                self._append_log(f"Class mode: {first['class_mode']}; mapping: {first['class_mapping']}")
                 self._append_log(f"Training manifest: {first['manifest_path']}")
         if thread.is_alive():
             self.root.after(150, lambda: self._poll(thread, state)); return
         self.train_button.config(state=tk.NORMAL)
         if state["error"]:
-            self.status_var.set("Mitotic tightener training failed."); self._append_log(f"Failed: {state['error']}")
-            messagebox.showerror("Mitotic Tightener Failed", str(state["error"]), parent=self.root); return
+            self.status_var.set("Cell tightener training failed."); self._append_log(f"Failed: {state['error']}")
+            messagebox.showerror("Cell Tightener Failed", str(state["error"]), parent=self.root); return
         result = state["result"]
         self.status_var.set(f"Training complete. Best weights: {result['best_weights']}")
         self._append_log(f"Run directory: {result['run_dir']}")
         self._append_log(f"Training manifest: {result['dataset_info']['manifest_path']}")
         self._append_log(f"Best weights: {result['best_weights']}")
+        self._append_log(f"Model metadata: {result['model_metadata_path']}")
         self._append_log(f"Last weights: {result['last_weights']}")
         self._append_log(f"Validation metrics: {result['validation_metrics']}")
         self._append_log(f"Test metrics: {result['test_metrics']}")
-        messagebox.showinfo("Mitotic Tightener Complete", f"Best weights:\n{result['best_weights']}\n\nTest metrics:\n{result['test_metrics']}", parent=self.root)
+        messagebox.showinfo("Cell Tightener Complete", f"Best weights:\n{result['best_weights']}\n\nTest metrics:\n{result['test_metrics']}", parent=self.root)

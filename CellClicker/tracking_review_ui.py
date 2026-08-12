@@ -617,6 +617,7 @@ class TrackingReviewUI:
         )
 
         box_rect = self._draw_box_within_tile(x1, y1, crop_bounds, image.size, box, border_color)
+        self._draw_predicted_class_warning(box_rect, timepoint, box)
         handles = self._draw_edit_handles(box_rect) if self._is_selected_tile(timepoint_index, box_type) else {}
 
         return {
@@ -632,6 +633,31 @@ class TrackingReviewUI:
             "rect_id": rect_id,
             "label_id": label_id,
         }
+
+    @staticmethod
+    def _predicted_class_warning(timepoint, box):
+        """Return a non-interactive warning only for a differing multiclass prediction."""
+        predicted_class_id = box.get("predicted_class_id")
+        if box.get("box_type") != "yolo11_tightened" or predicted_class_id is None:
+            return None
+        if int(predicted_class_id) == int(timepoint["class_id"]):
+            return None
+        class_name = box.get("predicted_class_name") or str(predicted_class_id)
+        return f"pred: {class_name}"
+
+    def _draw_predicted_class_warning(self, box_rect, timepoint, box):
+        warning = self._predicted_class_warning(timepoint, box)
+        if warning is None:
+            return None
+        x1, _, _, y2 = box_rect
+        return self.track_canvas.create_text(
+            x1 + 3,
+            y2 - 3,
+            text=warning,
+            fill="#ff3333",
+            anchor=tk.SW,
+            font=("Arial", 9, "bold"),
+        )
 
     def _get_box_rect_within_tile(self, tile_x, tile_y, crop_bounds, image_size, box):
         tile_width = self.get_tile_width()
