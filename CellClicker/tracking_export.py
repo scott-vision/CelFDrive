@@ -7,6 +7,9 @@ derived in image pixels, with X as columns and Y as rows.
 import logging
 import os
 import json
+import hashlib
+import shutil
+import tempfile
 
 from PIL import Image
 
@@ -14,6 +17,37 @@ from .tracking_xml import read_tracking_xml
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def tracking_xml_digest(tracking_xml_path):
+    """Return the content fingerprint used to prove an export is current."""
+    with open(tracking_xml_path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
+def export_manifest_path(output_dir):
+    return os.path.join(output_dir, "export_manifest.json")
+
+
+def write_export_manifest(output_dir, tracking_xml_path, box_type, export_type):
+    with open(export_manifest_path(output_dir), "w", encoding="utf-8") as handle:
+        json.dump({
+            "tracking_xml": os.path.normpath(tracking_xml_path),
+            "tracking_digest": tracking_xml_digest(tracking_xml_path),
+            "box_type": box_type,
+            "export_type": export_type,
+        }, handle, indent=2)
+
+
+def exported_labels_are_current(project_dir):
+    """Return whether exported YOLO labels match current tracking XML."""
+    tracking_xml = os.path.join(project_dir, "user_selections", "tracking_review.xml")
+    manifest = export_manifest_path(os.path.join(project_dir, "user_selections", "exported_labels"))
+    try:
+        with open(manifest, encoding="utf-8") as handle:
+            return json.load(handle).get("tracking_digest") == tracking_xml_digest(tracking_xml)
+    except (OSError, ValueError):
+        return False
 
 
 def _normalize_slashes(path):
@@ -158,12 +192,18 @@ def export_tracking_xml_to_yolo(tracking_xml_path, output_dir, box_type="preferr
                 f"{timepoint['class_id']} {chosen_box['x_center']} {chosen_box['y_center']} {chosen_box['width']} {chosen_box['height']}"
             )
 
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir = os.path.normpath(output_dir)
+    parent = os.path.dirname(output_dir) or os.curdir
+    staging_dir = tempfile.mkdtemp(prefix="celfdrive-export-", dir=parent)
     for relative_label_path, label_lines in labels_by_file.items():
-        output_path = os.path.join(output_dir, relative_label_path)
+        output_path = os.path.join(staging_dir, relative_label_path)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as handle:
             handle.write("\n".join(label_lines) + "\n")
+    write_export_manifest(staging_dir, tracking_xml_path, box_type, "yolo")
+    if os.path.isdir(output_dir):
+        shutil.rmtree(output_dir)
+    os.replace(staging_dir, output_dir)
 
     return labels_by_file
 
@@ -247,8 +287,11 @@ def export_tracking_xml_to_coco(tracking_xml_path, output_json_path, box_type="p
     output_directory = os.path.dirname(output_json_path)
     if output_directory:
         os.makedirs(output_directory, exist_ok=True)
-    with open(output_json_path, "w", encoding="utf-8") as handle:
+    temporary_path = output_json_path + ".tmp"
+    with open(temporary_path, "w", encoding="utf-8") as handle:
         json.dump(coco_data, handle, indent=2)
+    os.replace(temporary_path, output_json_path)
+    write_export_manifest(output_directory or os.curdir, tracking_xml_path, box_type, "coco")
 
     return coco_data
 
@@ -270,11 +313,12 @@ def export_tracking_xml_to_miniseries(tracking_xml_path, output_dir, box_type="p
     classes = tracking_data.get("classes", {})
 
     output_dir = os.path.normpath(output_dir)
-    os.makedirs(output_dir, exist_ok=True)
+    parent = os.path.dirname(output_dir) or os.curdir
+    staging_dir = tempfile.mkdtemp(prefix="celfdrive-miniseries-", dir=parent)
 
     exported_images = []
     for track_index, track in enumerate(tracking_data.get("tracks", []), start=1):
-        series_dir = os.path.join(output_dir, str(track_index))
+        series_dir = os.path.join(staging_dir, str(track_index))
         os.makedirs(series_dir, exist_ok=True)
 
         for timepoint_index, timepoint in enumerate(track.get("timepoints", []), start=1):
@@ -298,6 +342,11 @@ def export_tracking_xml_to_miniseries(tracking_xml_path, output_dir, box_type="p
                 cropped = image.crop(tuple(crop_bounds))
                 cropped.save(output_path)
 
-            exported_images.append(output_path)
+            exported_images.append(os.path.join(output_dir, os.path.relpath(output_path, staging_dir)))
+
+    write_export_manifest(staging_dir, tracking_xml_path, box_type, "miniseries")
+    if os.path.isdir(output_dir):
+        shutil.rmtree(output_dir)
+    os.replace(staging_dir, output_dir)
 
     return exported_images

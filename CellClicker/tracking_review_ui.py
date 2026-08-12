@@ -296,6 +296,9 @@ class TrackingReviewUI:
     def next_track(self):
         if not self.tracks:
             return
+        current = self.get_current_track()
+        if current and current.get("review_state") == "pending":
+            current["review_state"] = "reviewed"
         self.track_index = min(len(self.tracks) - 1, self.track_index + 1)
         self.selected_tile = None
         self.focused_tile = None
@@ -362,6 +365,8 @@ class TrackingReviewUI:
         self._focus_review_canvas()
 
     def _track_has_todo(self, track):
+        if track.get("review_state") == "pending":
+            return True
         for timepoint in track.get("timepoints", []):
             if timepoint.get("preferred_box_type") == "original":
                 return True
@@ -440,7 +445,8 @@ class TrackingReviewUI:
         self.track_label.config(
             text=(
                 f"Track {self.track_index + 1}/{len(self.tracks)} "
-                f"({track['track_id']})  Series {track['series_id']}  Frames {len(timepoints)}"
+                f"({track['track_id']})  Series {track['series_id']}  Frames {len(timepoints)}  "
+                f"Review: {track.get('review_state', 'reviewed')}"
             )
         )
 

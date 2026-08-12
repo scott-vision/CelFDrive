@@ -6,6 +6,7 @@ coordinates, while image paths identify individual timepoints.
 
 import logging
 import os
+import xml.etree.ElementTree as ET
 
 from .clicker_utils import get_relative_image_name
 from .convert_selections_multiphase import (
@@ -14,6 +15,8 @@ from .convert_selections_multiphase import (
     parse_xml_for_phases,
 )
 from .tracking_xml import DEFAULT_BOX_TYPES, DEFAULT_CLASSES, write_tracking_xml
+from .project_reconciliation import reconcile_tracking_records
+from .workflow_state import raw_revision_fingerprint, raw_track_revisions
 
 
 LOGGER = logging.getLogger(__name__)
@@ -78,7 +81,7 @@ def make_box(box_type, x_center, y_center, width, height, source):
     }
 
 
-def build_track_record(track_index, anchor_path, series_id, labels, phases, dataset_root=None, include_otsu=False):
+def build_track_record(track_index, anchor_path, series_id, labels, phases, dataset_root=None, include_otsu=False, raw_revision=0):
     """Build one chronological review track from legacy label and phase records.
 
     ``labels`` provides normalized YOLO boxes; ``phases`` maps phase names to
@@ -149,6 +152,8 @@ def build_track_record(track_index, anchor_path, series_id, labels, phases, data
         "track_id": f"T{track_index:05d}",
         "source_path": anchor_path,
         "series_id": str(series_id),
+        "raw_revision": int(raw_revision),
+        "review_state": "pending",
         "timepoints": timepoints,
     }
 
@@ -157,6 +162,7 @@ def build_tracking_records(phase_xml, cell_regions_xml, dataset_root=None, inclu
     """Build non-empty tracking records from phase and cell-region XML files."""
     phase_data = parse_xml_for_phases(phase_xml)
     label_data = parse_xml_for_labels(cell_regions_xml)
+    revisions = raw_track_revisions(cell_regions_xml)
 
     tracks = []
     track_index = 1
@@ -175,6 +181,7 @@ def build_tracking_records(phase_xml, cell_regions_xml, dataset_root=None, inclu
             phases,
             dataset_root=dataset_root,
             include_otsu=include_otsu,
+            raw_revision=revisions.get((anchor_path, str(series_id)), 0),
         )
         if track["timepoints"]:
             tracks.append(track)
@@ -189,6 +196,14 @@ def build_tracking_xml(phase_xml, cell_regions_xml, output_xml, dataset_root=Non
     The output document stores source paths, phase-derived class IDs, and
     normalized YOLO variants. ``include_otsu`` performs image thresholding.
     """
+    aggregate_root = ET.parse(phase_xml).getroot()
+    aggregate_fingerprint = aggregate_root.get("raw_revision_fingerprint")
+    current_fingerprint = raw_revision_fingerprint(cell_regions_xml)
+    if aggregate_fingerprint is not None and aggregate_fingerprint != current_fingerprint:
+        raise ValueError("Aggregated phase selections are stale. Re-run aggregation before building tracking review.")
+    if aggregate_fingerprint is None and any(raw_track_revisions(cell_regions_xml).values()):
+        raise ValueError("Aggregated phase selections lack raw revision provenance. Re-run aggregation before building tracking review.")
+
     metadata = {
         "phase_xml": os.path.normpath(phase_xml),
         "cell_regions_xml": os.path.normpath(cell_regions_xml),
@@ -202,6 +217,7 @@ def build_tracking_xml(phase_xml, cell_regions_xml, output_xml, dataset_root=Non
         dataset_root=dataset_root,
         include_otsu=include_otsu,
     )
+    tracks, metadata = reconcile_tracking_records(tracks, output_xml, cell_regions_xml, metadata)
     write_tracking_xml(
         output_xml,
         tracks,

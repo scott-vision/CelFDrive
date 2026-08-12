@@ -38,7 +38,7 @@ def update_xml(file_name, series_id, selected_index, xml_file_name):
     # Save the updated XML to the file
     tree.write(xml_file_name)
 
-def update_xml_multiclass(file_name, series_id, selected_indices, xml_file_name, phases):
+def update_xml_multiclass(file_name, series_id, selected_indices, xml_file_name, phases, selection_revision=0):
     """Upsert selected indices for ordered phase names in a user XML document."""
     # Parse the existing XML file
     tree = ET.parse(xml_file_name)
@@ -55,6 +55,7 @@ def update_xml_multiclass(file_name, series_id, selected_indices, xml_file_name,
         # Check if the file and series_id match
         if file_element is not None and series_id_element is not None and \
            file_element.text == file_name and series_id_element.text == str(series_id):
+            data_entry.set("selection_revision", str(selection_revision))
             # Update the selected_index values for each phase
             for phase in phases:
                 phase_element = data_entry.find(phase)
@@ -66,6 +67,7 @@ def update_xml_multiclass(file_name, series_id, selected_indices, xml_file_name,
     else:
         # If no matching entry was found, create a new one
         data_entry = ET.Element('DataEntry')
+        data_entry.set("selection_revision", str(selection_revision))
         file_element = ET.SubElement(data_entry, 'PathName')
         series_id_element = ET.SubElement(data_entry, 'SeriesID')
         file_element.text = file_name
@@ -90,12 +92,16 @@ def store_results(images_dict, selected_indicies, name_xml):
         print(file_name, series_id, selected_index, name_xml)
         update_xml(file_name, series_id, selected_index, name_xml)    
 
-def store_results_multiclass(images_dict, selected_indicies, name_xml, phases):
+def store_results_multiclass(images_dict, selected_indicies, name_xml, phases, revisions=None):
     """Persist phase selections for every image-series entry in ``images_dict``."""
 
+    revisions = revisions or {}
     for (file_name, series_id ), selected_index_dict in zip(images_dict.keys(), selected_indicies):
         print(file_name, series_id, selected_index_dict, name_xml)
-        update_xml_multiclass(file_name, series_id, selected_index_dict, name_xml, phases)    
+        update_xml_multiclass(
+            file_name, series_id, selected_index_dict, name_xml, phases,
+            selection_revision=revisions.get((file_name, str(series_id)), 0),
+        )
 
 
 def read_xml_to_dataframe(xml_file):

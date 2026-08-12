@@ -18,6 +18,7 @@ from .manageXML import append_cell_regions_xml, find_labels_and_extract_rois, ge
 from .user_xml import store_results, store_results_multiclass, read_xml_to_dataframe
 from .convert_selections import modify_class_ids, append_modified_labels
 from .convert_selections_multiphase import parse_xml_for_phases, parse_xml_for_phases_resume
+from .workflow_state import entry_is_current, raw_track_revisions, selection_entries_by_track
 
 
 def _finish_selector(root):
@@ -27,14 +28,19 @@ def _finish_selector(root):
         root.destroy()
 
 
-def _load_selected_indices_from_xml(image_keys, name_xml):
+def _load_selected_indices_from_xml(image_keys, name_xml, revisions=None):
     if not name_xml or not os.path.exists(name_xml):
         return []
 
     stored_selections = parse_xml_for_phases_resume(name_xml)
+    entries = selection_entries_by_track(name_xml)
     selected_indices = []
     for image_key in image_keys:
-        selected_indices.append(dict(stored_selections.get(image_key, {})))
+        revision = (revisions or {}).get((image_key[0], str(image_key[1])), 0)
+        entry = entries.get((image_key[0], str(image_key[1])))
+        selected_indices.append(
+            dict(stored_selections.get(image_key, {})) if entry_is_current(entry, revision) else {}
+        )
     return selected_indices
 
 
@@ -116,7 +122,7 @@ def _load_images_with_progress(cell_xml, root):
     return result.get("images_dict", {})
 
 
-def load_selector(image_dict, set_index, phases, name_xml, parent=None):
+def load_selector(image_dict, set_index, phases, name_xml, parent=None, revisions=None):
     """Open the phase selector for image series and return selected indices.
 
     ``image_dict`` maps ``(image_path, series_id)`` to ordered image arrays.
@@ -175,8 +181,13 @@ def load_selector(image_dict, set_index, phases, name_xml, parent=None):
 
     print(f"Loading {len(image_sets)} image sets")
     loading_window.destroy()
-    selected_indices = _load_selected_indices_from_xml(image_keys, name_xml)
-    display_set(image_sets, image_keys, set_index, selected_indices, root, phases[0], phases, name_xml)
+    selected_indices = _load_selected_indices_from_xml(image_keys, name_xml, revisions=revisions)
+    next_set_index, next_phase = _find_resume_position(selected_indices, phases)
+    if next_set_index >= len(image_sets):
+        # Keep the ordered list available for inspection and correction even
+        # when every track is currently complete.
+        next_set_index, next_phase = min(set_index, max(0, len(image_sets) - 1)), phases[0]
+    display_set(image_sets, image_keys, next_set_index, selected_indices, root, next_phase, phases, name_xml)
     if getattr(root, "_selector_owns_root", False):
         root.mainloop()
     return selected_indices
@@ -217,12 +228,20 @@ def display_set(image_sets, image_keys, set_index, selected_indices, root, phase
     window.title(f"Select First frame visible for {phase.capitalize()} - Set {set_index + 1} of {len(image_sets)}")
 
     series = image_sets[set_index]
+    source_image, series_id = image_keys[set_index]
     set_len = len(series)
     max_images_per_row = 13 
     min_window_width = 100*max_images_per_row  # Calculate minimum width based on max images per row and their thumbnail size
     window.minsize(min_window_width, 0) 
 
     
+
+    tk.Label(
+        window,
+        text=f"Track {set_index + 1}/{len(image_sets)}  |  Series {series_id}  |  Source image: {source_image}",
+        anchor=tk.W,
+        justify=tk.LEFT,
+    ).grid(row=0, column=0, columnspan=max_images_per_row, sticky='w', padx=4, pady=(0, 2))
 
     photo_images = []  # To store PhotoImage references and prevent garbage collection
     selected_index_for_phase = None
@@ -244,7 +263,7 @@ def display_set(image_sets, image_keys, set_index, selected_indices, root, phase
         justify=tk.LEFT,
         fg="#22cc22" if selected_index_for_phase is not None else "#cccccc",
     )
-    selected_label.grid(row=0, column=0, columnspan=max_images_per_row, sticky='w', padx=4, pady=(0, 6))
+    selected_label.grid(row=1, column=0, columnspan=max_images_per_row, sticky='w', padx=4, pady=(0, 6))
 
     window.bind(
         "<Left>",
@@ -256,7 +275,7 @@ def display_set(image_sets, image_keys, set_index, selected_indices, root, phase
     )
 
     for i, img_array in enumerate(series):
-        row = i // max_images_per_row + 1  # Determine which row to place the image
+        row = i // max_images_per_row + 2  # Determine which row to place the image
         column = i % max_images_per_row  # Determine which column to place the image
 
         img_array = normalize_image(img_array)
@@ -295,7 +314,7 @@ def display_set(image_sets, image_keys, set_index, selected_indices, root, phase
     window.geometry("+100+100")  # Optional: Position the window at a specific location
 
     # Buttons for skipping phase and marking blurry
-    button_row = (set_len - 1) // max_images_per_row + 2
+    button_row = (set_len - 1) // max_images_per_row + 3
     back_btn = tk.Button(window, text="Back", command=lambda: go_back(window, image_sets, image_keys, selected_indices, root, phase, set_index, phases, name_xml))
     back_btn.grid(row=button_row, column=0, sticky='ew')
 
@@ -310,10 +329,44 @@ def display_set(image_sets, image_keys, set_index, selected_indices, root, phase
 
     resume_btn = tk.Button(window, text="Resume", command=lambda: on_resume_clicked(window, image_sets, image_keys, selected_indices, root, phase, set_index, phases, name_xml))
     resume_btn.grid(row=button_row, column=4, sticky='ew')
+
+    todo_btn = tk.Button(
+        window,
+        text="Jump to Next TODO",
+        command=lambda: jump_to_next_todo(
+            window, image_sets, image_keys, selected_indices, root, set_index, phases, name_xml,
+        ),
+    )
+    todo_btn.grid(row=button_row, column=5, sticky='ew')
+
+    tk.Label(window, text="Track:").grid(row=button_row, column=6, sticky='e', padx=(8, 2))
+    track_number_var = tk.StringVar(value=str(set_index + 1))
+    track_number_entry = tk.Entry(window, textvariable=track_number_var, width=6)
+    track_number_entry.grid(row=button_row, column=7, sticky='w')
+    track_number_entry.bind(
+        "<Return>",
+        lambda _event: go_to_track(
+            track_number_var.get(), window, image_sets, image_keys, selected_indices,
+            root, phase, phases, name_xml,
+        ),
+    )
+    tk.Button(
+        window,
+        text="Go to Track",
+        command=lambda: go_to_track(
+            track_number_var.get(), window, image_sets, image_keys, selected_indices,
+            root, phase, phases, name_xml,
+        ),
+    ).grid(row=button_row, column=8, sticky='ew', padx=(2, 0))
     # print(set_index)
 
     save_btn = tk.Button(window, text="Save", command=lambda: on_save_clicked(selected_indices, phases, name_xml))
-    save_btn.grid(row=button_row, column=5, sticky='ew')
+    save_btn.grid(row=button_row, column=9, sticky='ew')
+    tk.Button(
+        window,
+        text="Close Selector",
+        command=lambda: close_selector(window, root),
+    ).grid(row=button_row, column=10, sticky='ew', padx=(4, 0))
 
 def _find_resume_position(selected_indices, phases):
     for current_set_index, phase_selection in enumerate(selected_indices):
@@ -323,19 +376,45 @@ def _find_resume_position(selected_indices, phases):
     return len(selected_indices), phases[0]
 
 
+def jump_to_next_todo(window, image_sets, image_keys, selected_indices, root, set_index, phases, name_xml):
+    """Navigate to the next track with a missing or revision-stale phase selection."""
+    for offset in range(1, len(image_sets) + 1):
+        candidate_index = (set_index + offset) % len(image_sets)
+        selections = selected_indices[candidate_index]
+        for phase in phases:
+            if phase not in selections:
+                display_set(
+                    image_sets, image_keys, candidate_index, selected_indices,
+                    root, phase, phases, name_xml, window=window,
+                )
+                return
+    messagebox.showinfo("Jump to Next TODO", "No incomplete tracks remain.")
+
+
+def go_to_track(track_number, window, image_sets, image_keys, selected_indices, root, phase, phases, name_xml):
+    """Open a one-based track number without changing its stored selection."""
+    try:
+        set_index = int(track_number) - 1
+    except (TypeError, ValueError):
+        messagebox.showerror("Go to Track", "Enter a whole track number.")
+        return
+    if not 0 <= set_index < len(image_sets):
+        messagebox.showerror("Go to Track", f"Track number must be from 1 to {len(image_sets)}.")
+        return
+    display_set(
+        image_sets, image_keys, set_index, selected_indices, root,
+        phase, phases, name_xml, window=window,
+    )
+
+
+def close_selector(window, root):
+    """Close Phase Selector only when the user explicitly chooses to do so."""
+    window.destroy()
+    _finish_selector(root)
+
+
 def on_resume_clicked(window, image_sets, image_keys, selected_indices, root, phase, set_index, phases, name_xml):
     """Resume selection at the next unfinished phase or image series."""
-    stored_selections = parse_xml_for_phases_resume(name_xml)
-    print(stored_selections)
-
-    selected_indices.clear()
-    for image_key in image_keys:
-        stored = stored_selections.get(image_key)
-        if stored is None:
-            break
-        print(stored)
-        selected_indices.append(stored)
-
     next_set_index, next_phase = _find_resume_position(selected_indices, phases)
     window.destroy()
 
@@ -388,13 +467,22 @@ def handle_next_phase_or_set(window, image_sets, image_keys, selected_indices, r
     if next_index < len(phases):
         display_set(image_sets, image_keys, set_index, selected_indices, root, phases[next_index], phases, name_xml, window=window)
     else:
-        window.destroy()
-        if set_index + 1 < len(image_sets):
-            display_set(image_sets, image_keys, set_index + 1, selected_indices, root, phases[0], phases, name_xml)
-        else:
-            messagebox.showinfo("Completed", "All selections completed.")
-            print("Final selections:", selected_indices)
-            _finish_selector(root)
+        for offset in range(1, len(image_sets) + 1):
+            candidate_index = (set_index + offset) % len(image_sets)
+            for candidate_phase in phases:
+                if candidate_phase not in selected_indices[candidate_index]:
+                    window.destroy()
+                    display_set(
+                        image_sets, image_keys, candidate_index, selected_indices,
+                        root, candidate_phase, phases, name_xml,
+                    )
+                    return
+        messagebox.showinfo("Completed", "All selections completed.")
+        print("Final selections:", selected_indices)
+        display_set(
+            image_sets, image_keys, set_index, selected_indices, root,
+            phase, phases, name_xml, window=window,
+        )
 
 def on_blurry_clicked(window, image_sets, image_keys, selected_indices, root, set_index, phases, name_xml):
     """Record the current phase as unavailable because the image is blurry."""
@@ -406,7 +494,10 @@ def on_blurry_clicked(window, image_sets, image_keys, selected_indices, root, se
         display_set(image_sets, image_keys, set_index + 1, selected_indices, root, phases[0], phases, name_xml)
     else:
         messagebox.showinfo("Completed", "All selections completed.")
-        _finish_selector(root)
+        display_set(
+            image_sets, image_keys, set_index, selected_indices, root,
+            phases[0], phases, name_xml,
+        )
 
 def on_skip_clicked(window, image_sets, image_keys, selected_indices, root, phase, set_index, phases, name_xml):
     """Record an explicit skipped phase and advance the selector."""
@@ -476,8 +567,9 @@ def load_ui_for_project(directory, phases=None, parent=None):
 
     name_xml = run_name_selector(selections_folder)
     images_dict = _load_images_with_progress(cell_xml, progress_root)
-    selected_indices = load_selector(images_dict, 0, phases, name_xml, parent=parent)
-    store_results_multiclass(images_dict, selected_indices, name_xml, phases)
+    revisions = raw_track_revisions(cell_xml)
+    selected_indices = load_selector(images_dict, 0, phases, name_xml, parent=parent, revisions=revisions)
+    store_results_multiclass(images_dict, selected_indices, name_xml, phases, revisions=revisions)
     if parent is None and getattr(progress_root, "_selector_owns_root", False):
         try:
             progress_root.destroy()

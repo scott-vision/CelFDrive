@@ -125,6 +125,7 @@ def append_cell_regions_xml(xml_path, label_path, class_id, x_center, y_center, 
     if series_elem is None:
         # print("series not found!")
         series_elem = ET.Element("series", id=str(series))
+        series_elem.set("revision", "0")
         parent_elem.append(series_elem)
 
 #     # Create a <series> element for the specified series
@@ -200,6 +201,18 @@ def get_series_count_for_label(xml_path, label_name):
         series_count = len(parent_elem.findall("series"))
 
     return series_count
+
+
+def get_next_series_id(xml_path, label_name):
+    """Return an unused numeric series ID without renumbering existing tracks."""
+    if not os.path.exists(xml_path):
+        return 1
+    root = ET.parse(xml_path).getroot()
+    for elem in root.findall("path"):
+        if elem.findtext("name") == label_name:
+            ids = [int(series.get("id")) for series in elem.findall("series") if series.get("id", "").isdigit()]
+            return max(ids, default=0) + 1
+    return 1
 
 
 def get_all_images(xml_path, progress_callback=None):
@@ -421,12 +434,6 @@ def remove_entry_from_xml(xml_path, label_path, series_id):
         parent_elem.remove(series_to_remove)
         print(f"Series {series_id} removed from {label_path}.")
 
-        # Adjust series IDs to remain consecutive
-        new_series_id = 1
-        for series_elem in sorted(parent_elem.findall("series"), key=lambda s: int(s.get("id"))):
-            series_elem.set("id", str(new_series_id))
-            new_series_id += 1
-
         # Remove <path> if there are no series left
         if not parent_elem.findall("series"):
             root.remove(parent_elem)
@@ -437,3 +444,62 @@ def remove_entry_from_xml(xml_path, label_path, series_id):
         print("XML updated successfully.")
     else:
         print(f"Series {series_id} not found in {label_path}.")
+
+
+def get_series_extension_start(xml_path, label_path, series_id):
+    """Return the earliest raw box and source index for an existing series."""
+    root = ET.parse(xml_path).getroot()
+    for path_elem in root.findall("path"):
+        if path_elem.findtext("name") != label_path:
+            continue
+        for series in path_elem.findall("series"):
+            if series.get("id") != str(series_id):
+                continue
+            labels = series.findall("label")
+            if not labels:
+                raise ValueError(f"CellClicker series {series_id} has no labels to extend.")
+            label = max(labels, key=lambda item: int(item.findtext("class_id")))
+            return {
+                "class_id": int(label.findtext("class_id")),
+                "x_center": float(label.findtext("x_center")),
+                "y_center": float(label.findtext("y_center")),
+                "width": float(label.findtext("width")),
+                "height": float(label.findtext("height")),
+            }
+    raise ValueError(f"CellClicker series {series_id} was not found.")
+
+
+def prepare_series_extension(xml_path, label_path, series_id):
+    """Increment a series revision and move it to the end of its source path."""
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    for path_elem in root.findall("path"):
+        if path_elem.findtext("name") != label_path:
+            continue
+        for series in path_elem.findall("series"):
+            if series.get("id") != str(series_id):
+                continue
+            current_revision = int(series.get("revision", "0"))
+            series.set("revision", str(current_revision + 1))
+            path_elem.remove(series)
+            path_elem.append(series)
+            tree.write(xml_path)
+            return current_revision + 1
+    raise ValueError(f"CellClicker series {series_id} was not found for extension.")
+
+
+def find_series_anchor_for_image(xml_path, image_path, series_id):
+    """Find the anchor path for a displayed frame belonging to one raw series."""
+    normalized_image = os.path.normpath(image_path).replace("\\", "/")
+    root = ET.parse(xml_path).getroot()
+    for path_elem in root.findall("path"):
+        anchor = path_elem.findtext("name")
+        for series in path_elem.findall("series"):
+            if series.get("id") != str(series_id):
+                continue
+            for label in series.findall("label"):
+                source_index = int(label.findtext("class_id"))
+                frame = get_relative_image_name(anchor, source_index)
+                if frame and os.path.normpath(frame).replace("\\", "/") == normalized_image:
+                    return anchor
+    raise ValueError(f"Could not identify raw series {series_id} for displayed image {image_path!r}.")

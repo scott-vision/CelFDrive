@@ -14,6 +14,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from .tracking_xml import read_tracking_xml
+from .tracking_export import exported_labels_are_current
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
@@ -88,7 +89,6 @@ def _resolve_project_pairs(project_dir):
         raise FileNotFoundError(
             f"Training project `{project_dir}` is missing `user_selections/exported_labels/`. Export labels first."
         )
-
     pairs = []
     for image_path in sorted(_iter_image_files(images_dir)):
         relative_image = os.path.relpath(image_path, images_dir)
@@ -105,6 +105,10 @@ def _summarize_projects(project_dirs):
     total_pairs = 0
     for project_dir in project_dirs:
         pairs = _resolve_project_pairs(project_dir)
+        if pairs and not exported_labels_are_current(project_dir):
+            raise ValueError(
+                f"Training project `{project_dir}` has stale exported labels. Rebuild YOLO labels from tracking review first."
+            )
         project_classes = _load_project_classes(project_dir)
         if class_names is None:
             class_names = project_classes
@@ -155,11 +159,14 @@ def _sync_project_labels(project_dir, progress_callback=None, current_offset=0, 
         raise FileNotFoundError(
             f"Training project `{project_dir}` is missing `user_selections/exported_labels/`. Export labels first."
         )
-
     pairs = _resolve_project_pairs(project_dir)
     if not pairs:
         raise ValueError(
             f"Training project `{project_dir}` has no images with exported labels. Export labels first."
+        )
+    if not exported_labels_are_current(project_dir):
+        raise ValueError(
+            f"Training project `{project_dir}` has stale exported labels. Rebuild YOLO labels from tracking review first."
         )
 
     staging_dir = tempfile.mkdtemp(prefix="celfdrive-labels-", dir=project_dir)

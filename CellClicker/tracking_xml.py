@@ -170,6 +170,8 @@ def append_track(root, track):
     track_elem.set("source_path", str(track["source_path"]))
     track_elem.set("series_id", str(track["series_id"]))
     track_elem.set("length", str(len(track["timepoints"])))
+    track_elem.set("raw_revision", str(track.get("raw_revision", 0)))
+    track_elem.set("review_state", str(track.get("review_state", "reviewed")))
 
     for timepoint in track["timepoints"]:
         timepoint_elem = ET.SubElement(track_elem, "Timepoint")
@@ -276,6 +278,8 @@ def read_tracking_xml(xml_file):
             "track_id": track_elem.get("id"),
             "source_path": track_elem.get("source_path"),
             "series_id": track_elem.get("series_id"),
+            "raw_revision": int(track_elem.get("raw_revision", "0")),
+            "review_state": track_elem.get("review_state", "reviewed"),
             "timepoints": [],
         }
         for timepoint_elem in track_elem.findall("Timepoint"):

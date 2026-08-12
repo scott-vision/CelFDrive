@@ -7,19 +7,24 @@ import numpy as np
 import tkinter as tk
 from tkinter import Button, Toplevel, Label, filedialog, messagebox
 from PIL import Image, ImageTk
-from CellClicker.manageXML import get_series_count_for_label, append_cell_regions_xml, check_xml, remove_entry_from_xml
-from CellClicker.clicker_utils import get_previous_image_name, yolov5_to_xywh
+from CellClicker.manageXML import (
+    append_cell_regions_xml, check_xml, find_series_anchor_for_image,
+    get_next_series_id, get_series_extension_start, prepare_series_extension,
+    remove_entry_from_xml,
+)
+from CellClicker.clicker_utils import get_previous_image_name, get_relative_image_name, yolov5_to_xywh
 
 
 class ImageProcessor:
     """Load and normalize microscope image files for annotation display."""
-    def __init__(self, master, image_path, bbox, xml_path):
+    def __init__(self, master, image_path, bbox, xml_path, series_id, next_class_id=0, anchor_path=None):
         self.master = master
         self.image_path = image_path
-        self.first_label = image_path
+        self.first_label = anchor_path or image_path
         self.bbox = bbox
         self.xml_path = xml_path
-        self.class_id = 0
+        self.class_id = next_class_id
+        self.series_id = series_id
         
         # Create a new window for image processing
         self.image_window = Toplevel(self.master)
@@ -37,7 +42,6 @@ class ImageProcessor:
         self.stop_button = Button(self.image_window, text="Finished", command=self.end_session)
         self.stop_button.pack(side=tk.BOTTOM)
 
-        self.series_count = get_series_count_for_label(self.xml_path, self.first_label)
         # print("current series")
         # print(self.series_count)
         
@@ -111,7 +115,7 @@ class ImageProcessor:
         
         append_cell_regions_xml(self.xml_path, self.first_label, self.class_id,
                                 (x_start + x_end) / 2, (y_start + y_end) / 2,
-                                self.current_w, self.current_h, self.x_shape, self.y_shape, self.series_count+1)
+                                self.current_w, self.current_h, self.x_shape, self.y_shape, self.series_id)
 
         self.class_id += 1
 
@@ -474,6 +478,7 @@ class ImageViewer:
 
         # Bind clicks to delete
         self.canvas.tag_bind("delete_x", "<Button-1>", self.handle_delete_click)
+        self.canvas.tag_bind("bbox", "<Button-3>", self.handle_extend_click)
 
 
 
@@ -487,11 +492,58 @@ class ImageViewer:
             series_id_to_remove = self.delete_buttons[clicked_x_id]
             image_path = self.images[self.current_image]
 
-            # Remove the series and adjust remaining IDs
-            remove_entry_from_xml(self.xml_path, label_path=image_path, series_id=series_id_to_remove)
+            if not messagebox.askyesno(
+                "Delete CellClicker Track",
+                "Delete this raw CellClicker series and remove its phase selections, aggregate entry, "
+                "and tracking-review record? Existing exports will be marked stale and must be rebuilt.\n\n"
+                "This cannot be undone.",
+                parent=self.root,
+            ):
+                return
+            from CellClicker.project_reconciliation import delete_track_from_project
+            delete_track_from_project(self.project_dir, image_path, series_id_to_remove)
 
             # Refresh display
             self.update_progress()
+
+    def handle_extend_click(self, event):
+        """Offer non-destructive backward extension for the clicked raw series."""
+        item_id = self.canvas.find_closest(event.x, event.y)[0]
+        for bbox in self.existing_bboxes:
+            x, y, width, height, series_id, _ = bbox
+            scale_x = self.canvas.winfo_width() / self.original_image.width
+            scale_y = self.canvas.winfo_height() / self.original_image.height
+            if int(x * scale_x) <= event.x <= int((x + width) * scale_x) and int(y * scale_y) <= event.y <= int((y + height) * scale_y):
+                if not messagebox.askyesno(
+                    "Extend Track Earlier",
+                    "Continue this series into earlier raw timepoints? Its phase selection will become incomplete "
+                    "and the reconciled track will require review. Existing reviewed boxes are kept.",
+                    parent=self.root,
+                ):
+                    return
+                try:
+                    anchor_path = find_series_anchor_for_image(self.xml_path, self.images[self.current_image], series_id)
+                    start = get_series_extension_start(self.xml_path, anchor_path, series_id)
+                    prepare_series_extension(self.xml_path, anchor_path, series_id)
+                    earliest_path = get_relative_image_name(anchor_path, start["class_id"])
+                    if not earliest_path:
+                        raise ValueError("This series is already at the first available timepoint.")
+                    image = Image.open(earliest_path)
+                    self.start_clicker(
+                        {
+                            "x": int((start["x_center"] - start["width"] / 2) * image.width),
+                            "y": int((start["y_center"] - start["height"] / 2) * image.height),
+                            "width": int(start["width"] * image.width),
+                            "height": int(start["height"] * image.height),
+                        },
+                        series_id=series_id,
+                        next_class_id=start["class_id"] + 1,
+                        image_path=earliest_path,
+                        anchor_path=anchor_path,
+                    )
+                except Exception as exc:
+                    messagebox.showerror("Extend Track Earlier", str(exc), parent=self.root)
+                return
 
 
 
@@ -503,10 +555,12 @@ class ImageViewer:
         self.update_image()  # Refresh display
 
 
-    def start_clicker(self, bbox):
+    def start_clicker(self, bbox, series_id=None, next_class_id=0, image_path=None, anchor_path=None):
         bbox['label'] = 'u-0'
-        img_path = self.images[self.current_image]
-        ImageProcessor(self.root, img_path, bbox, self.xml_path)
+        img_path = image_path or self.images[self.current_image]
+        if series_id is None:
+            series_id = get_next_series_id(self.xml_path, img_path)
+        ImageProcessor(self.root, img_path, bbox, self.xml_path, series_id, next_class_id, anchor_path)
 
     def next_image(self):
         if self.current_image < len(self.images) - 1:

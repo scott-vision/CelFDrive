@@ -26,6 +26,10 @@ from .tracking_workflow import build_tracking_xml_from_dataset
 from .tracking_xml import read_tracking_xml
 from .yolo_training_ui import YOLOTrainingUI
 from .mitotic_tightener_ui import MitoticTightenerTrainingUI
+from .project_reconciliation import tracking_is_current
+from .workflow_state import annotator_selection_files
+from .duplicate_tracks import find_near_duplicate_tracks
+from .project_reconciliation import delete_track_from_project
 
 
 LOGGER = logging.getLogger(__name__)
@@ -127,6 +131,7 @@ class ProjectGUI:
         stage4 = tk.LabelFrame(right, text="4. Review")
         stage4.pack(fill=tk.X, pady=(0, 10))
         tk.Button(stage4, text="Open Tracking Review", command=self.open_tracking_review, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        tk.Button(stage4, text="Check Duplicate Tracks", command=self.check_duplicate_tracks, width=24).pack(side=tk.LEFT, padx=8, pady=8)
 
         stage5 = tk.LabelFrame(right, text="5. Export")
         stage5.pack(fill=tk.X, pady=(0, 10))
@@ -287,21 +292,22 @@ class ProjectGUI:
 
         selections_dir = os.path.join(self.project_dir, "user_selections")
         os.makedirs(selections_dir, exist_ok=True)
-        xml_files = glob(os.path.join(selections_dir, "*.xml"))
-
-        excluded = {
-            os.path.join(selections_dir, "polled.xml"),
-            os.path.join(selections_dir, "aggregated_tracking.xml"),
-            os.path.join(selections_dir, "tracking_review.xml"),
-        }
-        xml_files = [path for path in xml_files if os.path.normpath(path) not in {os.path.normpath(x) for x in excluded}]
+        xml_files = annotator_selection_files(selections_dir)
 
         if not xml_files:
             messagebox.showerror("No User XMLs", "No user selection XML files were found to aggregate.")
             return
 
         output_xml = os.path.join(selections_dir, "aggregated_tracking.xml")
-        aggregate_xml(xml_files, output_xml)
+        try:
+            aggregate_xml(
+                xml_files, output_xml,
+                cell_regions_xml=os.path.join(self.project_dir, "images", "cell_reigons.xml"),
+            )
+        except ValueError as exc:
+            messagebox.showerror("Selections Need Updating", str(exc), parent=self.root)
+            self.status_var.set("Aggregation blocked: phase selections need updating.")
+            return
         self._refresh_project_status()
         self.status_var.set(f"Aggregated {len(xml_files)} user XML files into aggregated_tracking.xml.")
         messagebox.showinfo("Aggregation Complete", f"Created file:\n{output_xml}")
@@ -309,21 +315,40 @@ class ProjectGUI:
     def build_tracking_xml(self):
         if not self._require_project():
             return
-        output_xml = build_tracking_xml_from_dataset(
-            dataset_dir=self.project_dir,
-            include_otsu=False,
-            launch_ui=False,
-        )
+        try:
+            output_xml = build_tracking_xml_from_dataset(
+                dataset_dir=self.project_dir,
+                include_otsu=False,
+                launch_ui=False,
+            )
+        except ValueError as exc:
+            messagebox.showerror("Build Tracking XML", str(exc), parent=self.root)
+            self.status_var.set("Tracking build blocked: aggregation is stale.")
+            return
         self._refresh_project_status()
         self.status_var.set(f"Built tracking XML with original boxes: {output_xml}")
         messagebox.showinfo("Build Complete", f"Created file:\n{output_xml}")
 
+    def _require_current_tracking(self):
+        tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
+        cell_xml = os.path.join(self.project_dir, "images", "cell_reigons.xml")
+        if not os.path.isfile(tracking_xml):
+            messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.", parent=self.root)
+            return None
+        if not tracking_is_current(tracking_xml, cell_xml):
+            messagebox.showerror(
+                "Tracking Data Stale",
+                "Raw CellClicker tracks changed. Reselect affected tracks, aggregate selections, and rebuild tracking review first.",
+                parent=self.root,
+            )
+            return None
+        return tracking_xml
+
     def apply_otsu(self):
         if not self._require_project():
             return
-        tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
-        if not os.path.exists(tracking_xml):
-            messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.")
+        tracking_xml = self._require_current_tracking()
+        if not tracking_xml:
             return
 
         overwrite = messagebox.askyesno(
@@ -373,9 +398,8 @@ class ProjectGUI:
     def open_tracking_review(self):
         if not self._require_project():
             return
-        tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
-        if not os.path.exists(tracking_xml):
-            messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.")
+        tracking_xml = self._require_current_tracking()
+        if not tracking_xml:
             return
 
         if self.review_window and self.review_window.winfo_exists():
@@ -385,12 +409,91 @@ class ProjectGUI:
         TrackingReviewUI(self.review_window, tracking_xml_path=tracking_xml)
         self.status_var.set("Tracking review opened.")
 
+    def check_duplicate_tracks(self):
+        """Display high-overlap track pairs and safely remove a chosen duplicate."""
+        if not self._require_project():
+            return
+        tracking_xml = self._require_current_tracking()
+        if not tracking_xml:
+            return
+        tracking_data = read_tracking_xml(tracking_xml)
+        candidates = find_near_duplicate_tracks(tracking_data.get("tracks", []))
+        if not candidates:
+            messagebox.showinfo(
+                "Check Duplicate Tracks",
+                "No near-duplicate tracks found. Candidates require matching preferred labels on at least two frames with 90% box overlap.",
+                parent=self.root,
+            )
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Possible Duplicate Tracks")
+        dialog.geometry("760x380+220+220")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        tk.Label(
+            dialog,
+            text="Review these high-overlap candidates. Select a row, then delete only the duplicate track you do not want to keep.",
+            anchor=tk.W, justify=tk.LEFT,
+        ).pack(fill=tk.X, padx=12, pady=(12, 8))
+        columns = ("first", "second", "shared", "iou")
+        table = ttk.Treeview(dialog, columns=columns, show="headings", selectmode="browse")
+        table.heading("first", text="Track / Series A")
+        table.heading("second", text="Track / Series B")
+        table.heading("shared", text="Matching frames")
+        table.heading("iou", text="Mean IoU")
+        table.column("first", width=220)
+        table.column("second", width=220)
+        table.column("shared", width=130, anchor=tk.CENTER)
+        table.column("iou", width=100, anchor=tk.CENTER)
+        for index, candidate in enumerate(candidates):
+            first, second = candidate["first"], candidate["second"]
+            table.insert(
+                "", tk.END, iid=str(index),
+                values=(
+                    f"{first.get('track_id')} / {first.get('series_id')}",
+                    f"{second.get('track_id')} / {second.get('series_id')}",
+                    candidate["shared_frames"], f"{candidate['mean_iou']:.3f}",
+                ),
+            )
+        table.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 8))
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(fill=tk.X, padx=12, pady=(0, 12))
+
+        def delete_selected(which):
+            selected = table.selection()
+            if not selected:
+                messagebox.showerror("Delete Duplicate", "Select a candidate pair first.", parent=dialog)
+                return
+            candidate = candidates[int(selected[0])]
+            target = candidate["first"] if which == "first" else candidate["second"]
+            if not messagebox.askyesno(
+                "Delete Duplicate Track",
+                f"Delete {target.get('track_id')} (series {target.get('series_id')})?\n\n"
+                "This removes that track from CellClicker, selections, aggregate, and review. Exports must be rebuilt.",
+                parent=dialog,
+            ):
+                return
+            try:
+                delete_track_from_project(self.project_dir, target["source_path"], target["series_id"])
+            except Exception as exc:
+                messagebox.showerror("Delete Duplicate", str(exc), parent=dialog)
+                return
+            dialog.destroy()
+            self._refresh_project_status()
+            self.status_var.set(f"Deleted duplicate track {target.get('track_id')}; rebuild exports before training.")
+            messagebox.showinfo("Duplicate Deleted", "Track deleted. Existing exports are stale; rebuild exports before training.", parent=self.root)
+
+        tk.Button(button_frame, text="Delete Track A", command=lambda: delete_selected("first")).pack(side=tk.LEFT)
+        tk.Button(button_frame, text="Delete Track B", command=lambda: delete_selected("second")).pack(side=tk.LEFT, padx=8)
+        tk.Button(button_frame, text="Close", command=dialog.destroy).pack(side=tk.RIGHT)
+
     def export_yolo_labels(self):
         if not self._require_project():
             return
-        tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
-        if not os.path.exists(tracking_xml):
-            messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.")
+        tracking_xml = self._require_current_tracking()
+        if not tracking_xml:
             return
 
         output_dir = os.path.join(self.project_dir, "user_selections", "exported_labels")
@@ -405,9 +508,8 @@ class ProjectGUI:
     def export_coco_labels(self):
         if not self._require_project():
             return
-        tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
-        if not os.path.exists(tracking_xml):
-            messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.")
+        tracking_xml = self._require_current_tracking()
+        if not tracking_xml:
             return
 
         output_json_path = os.path.join(self.project_dir, "user_selections", "exported_coco", "annotations.json")
@@ -427,9 +529,8 @@ class ProjectGUI:
     def export_miniseries(self):
         if not self._require_project():
             return
-        tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
-        if not os.path.exists(tracking_xml):
-            messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.")
+        tracking_xml = self._require_current_tracking()
+        if not tracking_xml:
             return
 
         output_dir = os.path.join(self.project_dir, "miniseries")
@@ -449,9 +550,8 @@ class ProjectGUI:
         if not self._require_project():
             return
 
-        tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
-        if not os.path.exists(tracking_xml):
-            messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.")
+        tracking_xml = self._require_current_tracking()
+        if not tracking_xml:
             return
 
         model_name = simpledialog.askstring(
@@ -520,9 +620,8 @@ class ProjectGUI:
         """Save the trained tightener checkpoint selected for this project."""
         if not self._require_project():
             return
-        tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
-        if not os.path.isfile(tracking_xml):
-            messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.", parent=self.root)
+        tracking_xml = self._require_current_tracking()
+        if not tracking_xml:
             return
         weights_path = filedialog.askopenfilename(
             title="Select Cell Tightener best.pt", initialdir=DEFAULT_TIGHTENER_MODELS_ROOT,
@@ -557,9 +656,8 @@ class ProjectGUI:
     def run_tightener(self):
         if not self._require_project():
             return
-        tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
-        if not os.path.isfile(tracking_xml):
-            messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.", parent=self.root)
+        tracking_xml = self._require_current_tracking()
+        if not tracking_xml:
             return
         try:
             stats = self._run_with_progress_dialog(

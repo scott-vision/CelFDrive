@@ -45,6 +45,22 @@ SAM2, and the trained YOLO11 cell tightener create additional variants
 (`otsu`, `sam2`, and `yolo11_tightened`) rather than replacing the original
 annotation; manual refinement uses `tightened`.
 
+## Correcting or deleting raw tracks
+
+Right-click a green CellClicker box and choose **Extend earlier** to continue
+that series into missing earlier raw timepoints. The source series receives a
+new revision, so only that track is returned to each annotator's phase
+selection queue. Aggregation requires every annotator XML to have selected the
+current revision. Rebuilding tracking review reconciles the changed series:
+reviewed boxes on existing raw frames are retained, new frames start with
+their original boxes, and the series is marked pending for review.
+
+Deleting a CellClicker series asks for confirmation, then removes that series
+from annotator selections, the aggregate, and tracking review without changing
+other series IDs or reviews. Existing exports are retained but marked stale.
+Re-export before training; exports are rebuilt as complete snapshots so files
+belonging only to the deleted series are removed.
+
 ## Export and training
 
 Choose a box variant and export YOLO labels, COCO annotations, or cropped

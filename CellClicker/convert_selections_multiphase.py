@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 import os
 from .clicker_utils import get_relative_image_name
+from .workflow_state import format_stale_selection_report, raw_revision_fingerprint, stale_selection_report
 
 
 def xyxy_to_yolov5(x_min, y_min, x_max, y_max, img_width, img_height):
@@ -362,11 +363,13 @@ def adjust_phase_indices(aggregated_data):
 
     return pd.DataFrame(adjusted_data)
 
-def create_new_xml_file(aggregated_data, output_file):
+def create_new_xml_file(aggregated_data, output_file, raw_fingerprint=None):
     """ Create a new XML file with the aggregated and adjusted median data. """
     phase_order = ['prophase', 'earlyprometaphase', 'prometaphase', 'metaphase', 'anaphase', 'telophase']
 
     new_root = ET.Element('Data')
+    if raw_fingerprint is not None:
+        new_root.set("raw_revision_fingerprint", raw_fingerprint)
 
     grouped = aggregated_data.groupby(['PathName', 'SeriesID'])
 
@@ -388,10 +391,17 @@ def create_new_xml_file(aggregated_data, output_file):
     new_tree = ET.ElementTree(new_root)
     new_tree.write(output_file)
 
-def aggregate_xml(xml_files, output_file):
-    """Aggregate compatible user XML phase selections and write ``output_file``."""
+def aggregate_xml(xml_files, output_file, cell_regions_xml=None):
+    """Aggregate complete current-revision user selections and write ``output_file``."""
+    if cell_regions_xml is not None:
+        stale = stale_selection_report(cell_regions_xml, xml_files)
+        if stale:
+            raise ValueError(format_stale_selection_report(stale))
     aggregated_data = aggregate_phase_data(xml_files)
     adjusted_data = adjust_phase_indices(aggregated_data)
-    create_new_xml_file(adjusted_data, output_file)
+    create_new_xml_file(
+        adjusted_data, output_file,
+        raw_fingerprint=raw_revision_fingerprint(cell_regions_xml) if cell_regions_xml else None,
+    )
 
 
