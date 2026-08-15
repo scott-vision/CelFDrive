@@ -16,6 +16,6 @@ are written below `outputs/`, which is intentionally ignored by Git. The data
 and outputs demonstrate the software workflow only and are not biological
 validation or calibrated acquisition coordinates.
 
-The TIFF fixtures and trained detector are local data assets and are not stored
-in Git. Add the position-major TIFF files beneath `z_slices/` and configure the
-notebook with a suitable detector checkpoint before running the example.
+The TIFF fixtures are stored directly in Git. The trained detector is stored
+with Git LFS, so run `git lfs pull` after cloning if the checkpoint appears as
+a small pointer file.
