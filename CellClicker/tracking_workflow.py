@@ -12,6 +12,7 @@ def build_tracking_xml_from_dataset(
     output_xml=None,
     include_otsu=False,
     launch_ui=False,
+    phases=None,
 ):
     """Build tracking XML from the standard CellClicker project layout.
 
@@ -36,6 +37,7 @@ def build_tracking_xml_from_dataset(
         output_xml=output_xml,
         dataset_root=dataset_dir,
         include_otsu=include_otsu,
+        phases=phases or None,
     )
     if launch_ui:
         launch_tracking_review_ui(output_xml)

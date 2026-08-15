@@ -10,7 +10,12 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 import os
 from .clicker_utils import get_relative_image_name
-from .workflow_state import format_stale_selection_report, raw_revision_fingerprint, stale_selection_report
+from .workflow_state import (
+    format_stale_selection_report,
+    raw_revision_fingerprint,
+    selection_fingerprint,
+    stale_selection_report,
+)
 
 
 def xyxy_to_yolov5(x_min, y_min, x_max, y_max, img_width, img_height):
@@ -126,9 +131,9 @@ def adjust_bbox_via_threshold(image_path, label, x_center_norm, y_center_norm, w
 #     return x_center, y_center, width, height
 
 
-def parse_xml_for_phases(xml_file):
+def parse_xml_for_phases(xml_file, phases=None):
     """Read selected phase indices from user XML keyed by image path and series."""
-    """ Parse XML and get phase indices for each image and series. """
+    phases = set(phases or ['prophase','earlyprometaphase','prometaphase', 'metaphase', 'anaphase', 'telophase'])
     tree = ET.parse(xml_file)
     root = tree.getroot()
     image_data = {}
@@ -137,13 +142,14 @@ def parse_xml_for_phases(xml_file):
         series_id = entry.find('SeriesID').text
         indices = {
             phase.tag: int(phase.text) for phase in entry
-            if phase.tag in ['prophase','earlyprometaphase','prometaphase', 'metaphase', 'anaphase', 'telophase'] and phase.text.isdigit()
+            if phase.tag in phases and phase.text is not None and phase.text.lstrip('-').isdigit()
         }
         image_data[(path, series_id)] = indices
     return image_data
 
-def parse_xml_for_phases_resume(xml_file):
-    """ Parse XML and get phase indices for each image and series. """
+def parse_xml_for_phases_resume(xml_file, phases=None):
+    """Read selections for resuming, converting persisted ``-1`` values to skips."""
+    phases = set(phases or ['prophase','earlyprometaphase','prometaphase', 'metaphase', 'anaphase', 'telophase'])
     tree = ET.parse(xml_file)
     root = tree.getroot()
     image_data = {}
@@ -151,8 +157,9 @@ def parse_xml_for_phases_resume(xml_file):
         path = entry.find('PathName').text
         series_id = entry.find('SeriesID').text
         indices = {
-            phase.tag: int(phase.text) for phase in entry
-            if phase.tag in ['prophase','earlyprometaphase','prometaphase', 'metaphase', 'anaphase', 'telophase'] 
+            phase.tag: ('skipped' if int(phase.text) == -1 else int(phase.text))
+            for phase in entry
+            if phase.tag in phases and phase.text is not None and phase.text.lstrip('-').isdigit()
         }
         image_data[(path, series_id)] = indices
     return image_data
@@ -284,18 +291,9 @@ def convert_selections_multiphase(user_xml, cell_reigons_xml, new_label_folder, 
     create_yolo_labels(phase_data, labels_data, new_label_folder, user, imgpath)
 
 
-def calculate_median_handling_negatives(group):
-    """ Calculate median, if median is -1, recalculate ignoring -1 values. """
-    median_value = group.median()
-    if median_value == -1:
-        valid_values = group[group != -1]
-        if not valid_values.empty:
-            return valid_values.median()
-    return median_value
-
-
-def parse_xml_for_phases_df(xml_file):
+def parse_xml_for_phases_df(xml_file, phases=None):
     """ Parse XML and get phase indices for each image and series. """
+    phases = set(phases or ['prophase','earlyprometaphase','prometaphase', 'metaphase', 'anaphase', 'telophase'])
     tree = ET.parse(xml_file)
     root = tree.getroot()
     
@@ -307,7 +305,7 @@ def parse_xml_for_phases_df(xml_file):
         path = entry.find('PathName').text
         series_id = entry.find('SeriesID').text
         for phase in entry:
-            if phase.tag in ['prophase', 'earlyprometaphase', 'prometaphase', 'metaphase', 'anaphase', 'telophase']:
+            if phase.tag in phases:
                 data.append({
                     'User': user,
                     'PathName': path,
@@ -321,21 +319,24 @@ def parse_xml_for_phases_df(xml_file):
     return df
 
 def calculate_median_handling_negatives(group):
-    """ Calculate median, if median is -1, recalculate ignoring -1 values. """
-    median_value = group.median()
-    if median_value == -1:
-        valid_values = group[group != -1]
-        if not valid_values.empty:
-            return valid_values.median()
-    return median_value
+    """Aggregate one phase, requiring a strict majority to skip it.
 
-def aggregate_phase_data(xml_files):
+    ``-1`` is an explicit skip vote. It wins only when more than half of the
+    annotators skip; otherwise calculate the median from selected frames only.
+    """
+    skip_count = int((group == -1).sum())
+    if skip_count > len(group) / 2:
+        return -1
+    selected_values = group[group != -1]
+    return selected_values.median() if not selected_values.empty else -1
+
+def aggregate_phase_data(xml_files, phases=None):
     """ Aggregate phase data from multiple XML files, calculating the median index for each group. """
     all_data = pd.DataFrame()
 
     # Parse each XML file and concatenate the results
     for xml_file in xml_files:
-        df = parse_xml_for_phases_df(xml_file)
+        df = parse_xml_for_phases_df(xml_file, phases=phases)
         all_data = pd.concat([all_data, df], ignore_index=True)
 
     # Group by PathName, SeriesID, and Phase, and calculate the median index
@@ -343,9 +344,9 @@ def aggregate_phase_data(xml_files):
     
     return aggregated_data
 
-def adjust_phase_indices(aggregated_data):
+def adjust_phase_indices(aggregated_data, phases=None):
     """ Adjust phase indices to ensure each phase is later than the previous one. """
-    phase_order = ['prophase', 'earlyprometaphase', 'prometaphase', 'metaphase', 'anaphase', 'telophase']
+    phase_order = list(phases or ['prophase', 'earlyprometaphase', 'prometaphase', 'metaphase', 'anaphase', 'telophase'])
     adjusted_data = []
 
     grouped = aggregated_data.groupby(['PathName', 'SeriesID'])
@@ -363,13 +364,15 @@ def adjust_phase_indices(aggregated_data):
 
     return pd.DataFrame(adjusted_data)
 
-def create_new_xml_file(aggregated_data, output_file, raw_fingerprint=None):
+def create_new_xml_file(aggregated_data, output_file, raw_fingerprint=None, selection_digest=None, phases=None):
     """ Create a new XML file with the aggregated and adjusted median data. """
-    phase_order = ['prophase', 'earlyprometaphase', 'prometaphase', 'metaphase', 'anaphase', 'telophase']
+    phase_order = list(phases or ['prophase', 'earlyprometaphase', 'prometaphase', 'metaphase', 'anaphase', 'telophase'])
 
     new_root = ET.Element('Data')
     if raw_fingerprint is not None:
         new_root.set("raw_revision_fingerprint", raw_fingerprint)
+    if selection_digest is not None:
+        new_root.set("selection_fingerprint", selection_digest)
 
     grouped = aggregated_data.groupby(['PathName', 'SeriesID'])
 
@@ -391,17 +394,22 @@ def create_new_xml_file(aggregated_data, output_file, raw_fingerprint=None):
     new_tree = ET.ElementTree(new_root)
     new_tree.write(output_file)
 
-def aggregate_xml(xml_files, output_file, cell_regions_xml=None):
+def aggregate_xml(xml_files, output_file, cell_regions_xml=None, phases=None, phase_signature=None):
     """Aggregate complete current-revision user selections and write ``output_file``."""
     if cell_regions_xml is not None:
-        stale = stale_selection_report(cell_regions_xml, xml_files)
+        stale = stale_selection_report(
+            cell_regions_xml, xml_files, phases=phases or (), phase_signature=phase_signature,
+        )
         if stale:
             raise ValueError(format_stale_selection_report(stale))
-    aggregated_data = aggregate_phase_data(xml_files)
-    adjusted_data = adjust_phase_indices(aggregated_data)
+    phases = list(phases or ['prophase', 'earlyprometaphase', 'prometaphase', 'metaphase', 'anaphase', 'telophase'])
+    aggregated_data = aggregate_phase_data(xml_files, phases=phases)
+    adjusted_data = adjust_phase_indices(aggregated_data, phases=phases)
     create_new_xml_file(
         adjusted_data, output_file,
         raw_fingerprint=raw_revision_fingerprint(cell_regions_xml) if cell_regions_xml else None,
+        selection_digest=selection_fingerprint(xml_files),
+        phases=phases,
     )
 
 

@@ -58,7 +58,18 @@ def annotator_selection_files(selections_dir):
     return sorted(path for path in paths if is_annotator_selection_xml(path))
 
 
-def entry_is_current(entry, revision, phases=PHASES):
+def selection_fingerprint(selection_paths):
+    """Return a stable digest of the current annotator phase-selection documents."""
+    digest = hashlib.sha256()
+    for path in sorted(os.path.normcase(os.path.abspath(path)) for path in selection_paths):
+        digest.update(path.encode("utf-8"))
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(64 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
+def entry_is_current(entry, revision, phases=PHASES, phase_signature=None):
     """Return whether one annotator entry is complete for a raw revision."""
     if entry is None:
         return False
@@ -67,6 +78,8 @@ def entry_is_current(entry, revision, phases=PHASES):
     except ValueError:
         return False
     if selected_revision != revision:
+        return False
+    if phase_signature is not None and entry.get("phase_signature") != phase_signature:
         return False
     for phase in phases:
         value = entry.findtext(phase)
@@ -91,14 +104,14 @@ def selection_entries_by_track(xml_path):
     return entries
 
 
-def stale_selection_report(cell_regions_xml, annotator_xmls, phases=PHASES):
+def stale_selection_report(cell_regions_xml, annotator_xmls, phases=PHASES, phase_signature=None):
     """Return ``[(xml_path, track_key), ...]`` for missing/stale selections."""
     revisions = raw_track_revisions(cell_regions_xml)
     stale = []
     for xml_path in annotator_xmls:
         entries = selection_entries_by_track(xml_path)
         for key, revision in revisions.items():
-            if not entry_is_current(entries.get(key), revision, phases):
+            if not entry_is_current(entries.get(key), revision, phases, phase_signature=phase_signature):
                 stale.append((xml_path, key))
     return stale
 

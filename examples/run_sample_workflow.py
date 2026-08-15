@@ -68,7 +68,9 @@ def main():
 
     config = predict.load_predict_config(args.config)
     config["project"]["repo_path"] = str(REPOSITORY_ROOT)
-    config["model"]["weights_path"] = str(REPOSITORY_ROOT / "Models" / "Trained" / "weights" / "best.pt")
+    config["model"]["weights_path"] = str(
+        REPOSITORY_ROOT / "Models" / "yolo11x_p99p99_bg05" / "weights" / "best.pt"
+    )
     config["logging"]["enabled"] = False
     config["plotting"]["enabled"] = False
     predict.config = config

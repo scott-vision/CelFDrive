@@ -16,7 +16,12 @@ from .convert_selections_multiphase import (
 )
 from .tracking_xml import DEFAULT_BOX_TYPES, DEFAULT_CLASSES, write_tracking_xml
 from .project_reconciliation import reconcile_tracking_records
-from .workflow_state import raw_revision_fingerprint, raw_track_revisions
+from .workflow_state import (
+    annotator_selection_files,
+    raw_revision_fingerprint,
+    raw_track_revisions,
+    selection_fingerprint,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -55,10 +60,10 @@ def resolve_image_path(anchor_path, step_back, dataset_root=None):
     return os.path.normpath(image_path)
 
 
-def get_phase_for_index(index_in_time_order, phases):
+def get_phase_for_index(index_in_time_order, phases, phase_order=PHASE_ORDER):
     """Return the active phase for a zero-based chronological frame index."""
     selected_phase = None
-    for phase in PHASE_ORDER:
+    for phase in phase_order:
         start_index = phases.get(phase, -1)
         if start_index != -1 and index_in_time_order >= start_index:
             selected_phase = phase
@@ -81,7 +86,7 @@ def make_box(box_type, x_center, y_center, width, height, source):
     }
 
 
-def build_track_record(track_index, anchor_path, series_id, labels, phases, dataset_root=None, include_otsu=False, raw_revision=0):
+def build_track_record(track_index, anchor_path, series_id, labels, phases, dataset_root=None, include_otsu=False, raw_revision=0, phase_order=PHASE_ORDER, classes=DEFAULT_CLASSES):
     """Build one chronological review track from legacy label and phase records.
 
     ``labels`` provides normalized YOLO boxes; ``phases`` maps phase names to
@@ -96,12 +101,12 @@ def build_track_record(track_index, anchor_path, series_id, labels, phases, data
         if image_path is None:
             continue
 
-        phase_name = get_phase_for_index(timepoint_index, phases)
+        phase_name = get_phase_for_index(timepoint_index, phases, phase_order=phase_order)
         if phase_name is None:
             continue
 
         class_id = next(
-            class_key for class_key, class_name in DEFAULT_CLASSES.items() if class_name == phase_name
+            class_key for class_key, class_name in classes.items() if class_name == phase_name
         )
 
         boxes = [
@@ -158,9 +163,11 @@ def build_track_record(track_index, anchor_path, series_id, labels, phases, data
     }
 
 
-def build_tracking_records(phase_xml, cell_regions_xml, dataset_root=None, include_otsu=False):
+def build_tracking_records(phase_xml, cell_regions_xml, dataset_root=None, include_otsu=False, phases=PHASE_ORDER):
     """Build non-empty tracking records from phase and cell-region XML files."""
-    phase_data = parse_xml_for_phases(phase_xml)
+    phase_order = list(phases)
+    classes = {index: name for index, name in enumerate(phase_order)}
+    phase_data = parse_xml_for_phases(phase_xml, phases=phase_order)
     label_data = parse_xml_for_labels(cell_regions_xml)
     revisions = raw_track_revisions(cell_regions_xml)
 
@@ -168,9 +175,12 @@ def build_tracking_records(phase_xml, cell_regions_xml, dataset_root=None, inclu
     track_index = 1
 
     for (anchor_path, series_id), labels in label_data.items():
-        phases = phase_data.get((anchor_path, series_id), {})
-        phases = {key: value for key, value in phases.items() if value != -1}
-        if not phases:
+        selected_phase_indices = phase_data.get((anchor_path, series_id), {})
+        selected_phase_indices = {
+            phase_name: index for phase_name, index in selected_phase_indices.items()
+            if index >= 0
+        }
+        if not selected_phase_indices:
             continue
 
         track = build_track_record(
@@ -178,10 +188,12 @@ def build_tracking_records(phase_xml, cell_regions_xml, dataset_root=None, inclu
             anchor_path,
             series_id,
             labels,
-            phases,
+            selected_phase_indices,
             dataset_root=dataset_root,
             include_otsu=include_otsu,
             raw_revision=revisions.get((anchor_path, str(series_id)), 0),
+            phase_order=phase_order,
+            classes=classes,
         )
         if track["timepoints"]:
             tracks.append(track)
@@ -190,38 +202,51 @@ def build_tracking_records(phase_xml, cell_regions_xml, dataset_root=None, inclu
     return tracks
 
 
-def build_tracking_xml(phase_xml, cell_regions_xml, output_xml, dataset_root=None, include_otsu=False):
+def build_tracking_xml(phase_xml, cell_regions_xml, output_xml, dataset_root=None, include_otsu=False, phases=PHASE_ORDER):
     """Create tracking XML and return its in-memory track records.
 
     The output document stores source paths, phase-derived class IDs, and
     normalized YOLO variants. ``include_otsu`` performs image thresholding.
     """
+    phases = list(phases or PHASE_ORDER)
     aggregate_root = ET.parse(phase_xml).getroot()
     aggregate_fingerprint = aggregate_root.get("raw_revision_fingerprint")
+    aggregate_selection_fingerprint = aggregate_root.get("selection_fingerprint")
     current_fingerprint = raw_revision_fingerprint(cell_regions_xml)
     if aggregate_fingerprint is not None and aggregate_fingerprint != current_fingerprint:
         raise ValueError("Aggregated phase selections are stale. Re-run aggregation before building tracking review.")
     if aggregate_fingerprint is None and any(raw_track_revisions(cell_regions_xml).values()):
         raise ValueError("Aggregated phase selections lack raw revision provenance. Re-run aggregation before building tracking review.")
+    current_selection_fingerprint = selection_fingerprint(
+        annotator_selection_files(os.path.dirname(phase_xml))
+    )
+    if (
+        aggregate_selection_fingerprint is not None
+        and aggregate_selection_fingerprint != current_selection_fingerprint
+    ):
+        raise ValueError("Aggregated phase selections are stale. Re-run aggregation before building tracking review.")
 
     metadata = {
         "phase_xml": os.path.normpath(phase_xml),
         "cell_regions_xml": os.path.normpath(cell_regions_xml),
+        "selection_fingerprint": current_selection_fingerprint,
     }
     if dataset_root:
         metadata["dataset_root"] = os.path.normpath(dataset_root)
 
+    classes = {index: name for index, name in enumerate(phases)}
     tracks = build_tracking_records(
         phase_xml,
         cell_regions_xml,
         dataset_root=dataset_root,
         include_otsu=include_otsu,
+        phases=phases,
     )
     tracks, metadata = reconcile_tracking_records(tracks, output_xml, cell_regions_xml, metadata)
     write_tracking_xml(
         output_xml,
         tracks,
-        classes=DEFAULT_CLASSES,
+        classes=classes,
         box_types=DEFAULT_BOX_TYPES,
         metadata=metadata,
     )

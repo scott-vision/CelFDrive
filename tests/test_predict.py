@@ -20,6 +20,16 @@ def config_for_tests(**overrides):
             "top_clip_percentile": 0.01,
             "normalize_min_max": True,
         },
+        "inference": {
+            "mode": "standard",
+            "sahi": {
+                "confidence_threshold": 0.5,
+                "slice_size_px": 640,
+                "overlap_ratio": 0.25,
+                "tile_batch_size": 6,
+                "merge_iou_threshold": 0.1,
+            },
+        },
         "tiling": {
             "enabled": True,
             "tile_size_px": 640,
@@ -73,6 +83,16 @@ no_detection:
     assert config["no_detection"]["mode"] == "end_workflow"
     assert config["coordinate_conversion"]["mode"] == "stage"
     assert config["tiling"]["deduplication_tolerance_px"] == 1.0
+    assert config["inference"] == {
+        "mode": "standard",
+        "sahi": {
+            "confidence_threshold": 0.5,
+            "slice_size_px": 640,
+            "overlap_ratio": 0.25,
+            "tile_batch_size": 6,
+            "merge_iou_threshold": 0.1,
+        },
+    }
 
 
 def test_get_logging_directory_resolves_relative_log_directory_from_project_root(tmp_path):
@@ -161,6 +181,101 @@ def test_preprocess_image_rejects_invalid_percentile():
 
     with pytest.raises(ValueError, match="top_clip_percentile"):
         predict.preprocess_image(np.zeros((3, 3), dtype=np.uint8))
+
+
+def test_process_image_routes_sahi_without_standard_splitting(monkeypatch):
+    config = config_for_tests()
+    config["inference"]["mode"] = "sahi"
+    predict.config = config
+    observed = {}
+
+    def fake_sahi(image, settings):
+        observed["shape"] = image.shape
+        observed["settings"] = settings
+        return [[0, 1, 2, 3, 4, 0.9]]
+
+    monkeypatch.setattr(predict, "run_sahi_inference", fake_sahi)
+    monkeypatch.setattr(
+        predict,
+        "split_image",
+        lambda _image: pytest.fail("standard splitter must not run in SAHI mode"),
+    )
+
+    detections = predict.process_image(np.arange(16, dtype=np.uint8).reshape(4, 4))
+
+    assert detections == [[0, 1, 2, 3, 4, 0.9]]
+    assert observed["shape"] == (4, 4)
+    assert observed["settings"]["merge_iou_threshold"] == 0.1
+
+
+def test_run_sahi_inference_translates_merges_and_batches(monkeypatch):
+    import sahi.slicing
+
+    class FakeTensor:
+        def __init__(self, values):
+            self.values = np.asarray(values)
+
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            return self.values
+
+    class FakeBoxes:
+        def __init__(self, boxes, scores, classes):
+            self.xyxy = FakeTensor(boxes)
+            self.conf = FakeTensor(scores)
+            self.cls = FakeTensor(classes)
+
+    class FakeResult:
+        def __init__(self, boxes, scores, classes):
+            self.boxes = FakeBoxes(boxes, scores, classes)
+
+    class FakeModel:
+        names = {0: "prophase", 1: "prometaphase"}
+
+        def __init__(self):
+            self.batch_sizes = []
+            self.confidences = []
+
+        def predict(self, images, **kwargs):
+            self.batch_sizes.append(len(images))
+            self.confidences.append(kwargs["conf"])
+            results = []
+            for image in images:
+                marker = int(image[0, 0, 0])
+                if marker == 1:
+                    results.append(FakeResult([[10, 10, 30, 30]], [0.9], [0]))
+                elif marker == 2:
+                    results.append(FakeResult([[0, 10, 20, 30], [0, 10, 20, 30]], [0.8, 0.85], [0, 1]))
+                else:
+                    results.append(FakeResult([[5, 5, 15, 15]], [0.7], [0]))
+            return results
+
+    slices = [
+        {"image": np.full((40, 40, 3), 1, dtype=np.uint8), "starting_pixel": [0, 0]},
+        {"image": np.full((40, 40, 3), 2, dtype=np.uint8), "starting_pixel": [10, 0]},
+        {"image": np.full((40, 40, 3), 3, dtype=np.uint8), "starting_pixel": [100, 50]},
+    ]
+    monkeypatch.setattr(sahi.slicing, "slice_image", lambda *_args, **_kwargs: slices)
+    fake_model = FakeModel()
+    monkeypatch.setattr(predict, "get_model", lambda: fake_model)
+    settings = {
+        "confidence_threshold": 0.5,
+        "slice_size_px": 40,
+        "overlap_ratio": 0.25,
+        "tile_batch_size": 2,
+        "merge_iou_threshold": 0.1,
+    }
+
+    detections = predict.run_sahi_inference(np.zeros((200, 200), dtype=np.uint8), settings)
+
+    assert fake_model.batch_sizes == [2, 1]
+    assert fake_model.confidences == [0.5, 0.5]
+    assert len(detections) == 3
+    assert sorted(detection[0] for detection in detections) == [0, 0, 1]
+    assert any(detection[0] == 1 and detection[1:5] == [10.0, 10.0, 20.0, 20.0] for detection in detections)
+    assert any(detection[0] == 0 and detection[1:5] == [105.0, 55.0, 10.0, 10.0] for detection in detections)
 
 
 def test_class_specific_filtering_honours_threshold_and_priority():

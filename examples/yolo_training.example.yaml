@@ -1,0 +1,19 @@
+schema_version: 1
+splits:
+  train:
+    - path/to/training-project
+  val:
+    - path/to/validation-project
+  test:
+    - path/to/held-out-test-project
+model:
+  path: path/to/base-model.pt
+run:
+  output_root: ../Models/training_runs
+  name: example_run
+training:
+  epochs: 150
+  imgsz: 640
+  batch: 16
+  patience: 50
+  device: 0

@@ -2,7 +2,7 @@ schema_version: 1
 project:
   repo_path: .
 model:
-  weights_path: Models/Trained/weights/best.pt
+  weights_path: Models/yolo11x_p99p99_bg05/weights/best.pt
   backend: ultralytics_yolo
   suppress_stdout: true
 logging:
@@ -22,6 +22,14 @@ preprocessing:
     mode: first_channel_if_rgb
   top_clip_percentile: 0.01
   normalize_min_max: true
+inference:
+  mode: standard
+  sahi:
+    confidence_threshold: 0.5
+    slice_size_px: 640
+    overlap_ratio: 0.25
+    tile_batch_size: 6
+    merge_iou_threshold: 0.1
 tiling:
   enabled: true
   tile_size_px: 640

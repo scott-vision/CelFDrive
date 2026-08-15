@@ -13,6 +13,8 @@ from .convert_selections_multiphase import aggregate_xml
 from .image_selector_multiphase import load_ui_for_project
 from .tracking_otsu import run_otsu_on_tracking_xml
 from .tracking_export import export_tracking_xml_to_coco, export_tracking_xml_to_miniseries, export_tracking_xml_to_yolo
+from .tracking_export import exported_labels_are_current
+from .exported_dataset_viewer import ExportedDatasetViewer
 from .tracking_sam2 import DEFAULT_SAM2_DEVICE, DEFAULT_SAM2_MODEL, run_sam2_on_tracking_xml
 from .mitotic_tightener import (
     DEFAULT_TIGHTENER_SELECTION,
@@ -30,6 +32,8 @@ from .project_reconciliation import tracking_is_current
 from .workflow_state import annotator_selection_files
 from .duplicate_tracks import find_near_duplicate_tracks
 from .project_reconciliation import delete_track_from_project
+from .phase_settings import DEFAULT_PHASES, load_phases, phase_signature, save_phases, settings_path
+from .tooltips import add_tooltip
 
 
 LOGGER = logging.getLogger(__name__)
@@ -92,7 +96,10 @@ class ProjectGUI:
         top = tk.Frame(self.root)
         top.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
 
-        tk.Button(top, text="Load Project", command=self.load_project).pack(side=tk.LEFT)
+        add_tooltip(
+            tk.Button(top, text="Load Project", command=self.load_project),
+            "Choose the project folder containing images/, not the images folder itself.",
+        ).pack(side=tk.LEFT)
         tk.Button(top, text="Refresh Status", command=self._refresh_project_status).pack(side=tk.LEFT, padx=4)
         tk.Label(top, textvariable=self.project_var, anchor=tk.W).pack(side=tk.LEFT, padx=12)
 
@@ -115,32 +122,75 @@ class ProjectGUI:
         stage1.pack(fill=tk.X, pady=(0, 10))
         tk.Button(stage1, text="Open CellClicker", command=self.open_cell_clicker, width=24).pack(side=tk.LEFT, padx=8, pady=8)
         tk.Button(stage1, text="Open Phase Selector", command=self.open_phase_selector, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        add_tooltip(
+            tk.Button(stage1, text="Phase Selector Settings", command=self.open_phase_settings, width=24),
+            "Define the ordered phase names and class IDs used by selection, export, and training. Changing them makes existing selections stale.",
+        ).pack(side=tk.LEFT, padx=8, pady=8)
 
         stage2 = tk.LabelFrame(right, text="2. Aggregation and Build")
         stage2.pack(fill=tk.X, pady=(0, 10))
-        tk.Button(stage2, text="Aggregate User Selections", command=self.aggregate_user_selections, width=24).pack(side=tk.LEFT, padx=8, pady=8)
-        tk.Button(stage2, text="Build Tracking XML", command=self.build_tracking_xml, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        add_tooltip(
+            tk.Button(stage2, text="Aggregate User Selections", command=self.aggregate_user_selections, width=24),
+            "Combine all reviewers' current phase selections into aggregated_tracking.xml.",
+        ).pack(side=tk.LEFT, padx=8, pady=8)
+        add_tooltip(
+            tk.Button(stage2, text="Build Tracking XML", command=self.build_tracking_xml, width=24),
+            "Create or reconcile the canonical tracking_review.xml used for review and export.",
+        ).pack(side=tk.LEFT, padx=8, pady=8)
 
         stage3 = tk.LabelFrame(right, text="3. Box Generation")
         stage3.pack(fill=tk.X, pady=(0, 10))
-        tk.Button(stage3, text="Apply Otsu", command=self.apply_otsu, width=24).pack(side=tk.LEFT, padx=8, pady=8)
-        tk.Button(stage3, text="Run SAM/SAM2", command=self.run_sam2, width=24).pack(side=tk.LEFT, padx=8, pady=8)
-        tk.Button(stage3, text="Configure Cell Tightener", command=self.configure_tightener, width=24).pack(side=tk.LEFT, padx=8, pady=8)
-        tk.Button(stage3, text="Run YOLO11 Cell Tightener", command=self.run_tightener, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        add_tooltip(
+            tk.Button(stage3, text="Apply Otsu", command=self.apply_otsu, width=24),
+            "Add threshold-derived box alternatives without replacing existing boxes.",
+        ).pack(side=tk.LEFT, padx=8, pady=8)
+        add_tooltip(
+            tk.Button(stage3, text="Run SAM/SAM2", command=self.run_sam2, width=24),
+            "Add segmentation-derived box alternatives without replacing existing boxes.",
+        ).pack(side=tk.LEFT, padx=8, pady=8)
+        add_tooltip(
+            tk.Button(stage3, text="Configure Cell Tightener", command=self.configure_tightener, width=24),
+            "Select trained weights and the detection-selection rule used by the cell tightener.",
+        ).pack(side=tk.LEFT, padx=8, pady=8)
+        add_tooltip(
+            tk.Button(stage3, text="Run YOLO11 Cell Tightener", command=self.run_tightener, width=24),
+            "Add tightener-generated box alternatives using the saved configuration.",
+        ).pack(side=tk.LEFT, padx=8, pady=8)
 
         stage4 = tk.LabelFrame(right, text="4. Review")
         stage4.pack(fill=tk.X, pady=(0, 10))
-        tk.Button(stage4, text="Open Tracking Review", command=self.open_tracking_review, width=24).pack(side=tk.LEFT, padx=8, pady=8)
-        tk.Button(stage4, text="Check Duplicate Tracks", command=self.check_duplicate_tracks, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        add_tooltip(
+            tk.Button(stage4, text="Open Tracking Review", command=self.open_tracking_review, width=24),
+            "Choose the preferred box and phase for each frame, then save the reviewed result.",
+        ).pack(side=tk.LEFT, padx=8, pady=8)
+        add_tooltip(
+            tk.Button(stage4, text="Check Duplicate Tracks", command=self.check_duplicate_tracks, width=24),
+            "Find tracks that may describe the same cell based on overlap across shared frames.",
+        ).pack(side=tk.LEFT, padx=8, pady=8)
 
         stage5 = tk.LabelFrame(right, text="5. Export")
         stage5.pack(fill=tk.X, pady=(0, 10))
-        tk.Label(stage5, text="Export box type:").pack(side=tk.LEFT, padx=(8, 4))
-        export_box_menu = tk.OptionMenu(stage5, self.export_box_type_var, "preferred", "original", "otsu", "sam2", "yolo11_tightened", "tightened")
-        export_box_menu.pack(side=tk.LEFT, padx=(0, 8), pady=8)
-        tk.Button(stage5, text="Export YOLO Labels", command=self.export_yolo_labels, width=24).pack(side=tk.LEFT, padx=8, pady=8)
-        tk.Button(stage5, text="Export COCO Labels", command=self.export_coco_labels, width=24).pack(side=tk.LEFT, padx=8, pady=8)
-        tk.Button(stage5, text="Export Miniseries", command=self.export_miniseries, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        export_options = tk.Frame(stage5)
+        export_options.pack(fill=tk.X)
+        tk.Label(export_options, text="Export box type:").pack(side=tk.LEFT, padx=(8, 4), pady=(6, 0))
+        export_box_menu = tk.OptionMenu(export_options, self.export_box_type_var, "preferred", "original", "otsu", "sam2", "yolo11_tightened", "tightened")
+        add_tooltip(
+            export_box_menu,
+            "Choose which box variant to export. preferred uses the per-frame choices made in Tracking Review; named variants may be missing on some frames.",
+        )
+        export_box_menu.pack(side=tk.LEFT, padx=(0, 8), pady=(6, 0))
+        export_actions = tk.Frame(stage5)
+        export_actions.pack(fill=tk.X)
+        add_tooltip(
+            tk.Button(export_actions, text="Export YOLO Labels", command=self.export_yolo_labels, width=24),
+            "Create a complete YOLO training snapshot from the current reviewed data.",
+        ).pack(side=tk.LEFT, padx=8, pady=8)
+        tk.Button(export_actions, text="Export COCO Labels", command=self.export_coco_labels, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        tk.Button(export_actions, text="Export Miniseries", command=self.export_miniseries, width=24).pack(side=tk.LEFT, padx=8, pady=8)
+        add_tooltip(
+            tk.Button(stage5, text="View Exported Dataset", command=self.view_exported_dataset, width=24),
+            "Open a read-only preview of the current YOLO export.",
+        ).pack(anchor=tk.W, padx=8, pady=(0, 8))
 
         stage6 = tk.LabelFrame(right, text="Notes")
         stage6.pack(fill=tk.X, pady=(0, 10))
@@ -286,6 +336,73 @@ class ProjectGUI:
         self._refresh_project_status()
         self.status_var.set("Phase selector completed or updated user selections.")
 
+    def open_phase_settings(self):
+        """Edit the ordered phase IDs used by this project's selector and labels."""
+        if not self._require_project():
+            return
+        try:
+            phases = load_phases(self.project_dir)
+        except ValueError as exc:
+            messagebox.showerror("Phase Selector Settings", str(exc), parent=self.root)
+            return
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Phase Selector Settings")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        tk.Label(
+            dialog,
+            text="One phase per line as ID: phase_name. IDs must start at 0 and be consecutive.\n"
+            "Default: six ordered mitosis stages.",
+            justify=tk.LEFT, anchor=tk.W,
+        ).pack(fill=tk.X, padx=12, pady=(12, 8))
+        editor = tk.Text(dialog, width=42, height=10)
+        add_tooltip(
+            editor,
+            "Enter one ID: phase_name pair per line in chronological order. IDs must start at 0 and be consecutive.",
+        )
+        editor.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 8))
+        editor.insert("1.0", "\n".join(f"{index}: {name}" for index, name in enumerate(phases)))
+
+        def restore_default():
+            editor.delete("1.0", tk.END)
+            editor.insert("1.0", "\n".join(f"{index}: {name}" for index, name in enumerate(DEFAULT_PHASES)))
+
+        def save():
+            entries = []
+            try:
+                for line_number, line in enumerate(editor.get("1.0", tk.END).splitlines(), start=1):
+                    if not line.strip():
+                        continue
+                    identifier, name = line.split(":", 1)
+                    entries.append({"id": int(identifier.strip()), "name": name.strip()})
+            except ValueError:
+                messagebox.showerror("Phase Selector Settings", f"Line {line_number} must use `ID: phase_name`.", parent=dialog)
+                return
+            try:
+                saved_phases = save_phases(self.project_dir, entries)
+            except ValueError as exc:
+                messagebox.showerror("Phase Selector Settings", str(exc), parent=dialog)
+                return
+            dialog.destroy()
+            self.status_var.set(
+                "Phase settings saved. Run phase selection, aggregation, and tracking build before exporting. "
+                f"Configured phases: {', '.join(saved_phases)}."
+            )
+            messagebox.showinfo(
+                "Phase Settings Saved",
+                "Phase settings changed. Existing phase selections must be updated before aggregation and tracking rebuild.",
+                parent=self.root,
+            )
+
+        buttons = tk.Frame(dialog)
+        buttons.pack(fill=tk.X, padx=12, pady=(0, 12))
+        add_tooltip(
+            tk.Button(buttons, text="Restore Mitosis Default", command=restore_default),
+            "Replace the editor contents with the standard six-stage mitosis mapping.",
+        ).pack(side=tk.LEFT)
+        tk.Button(buttons, text="Save", command=save).pack(side=tk.RIGHT)
+        tk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT, padx=8)
+
     def aggregate_user_selections(self):
         if not self._require_project():
             return
@@ -303,6 +420,11 @@ class ProjectGUI:
             aggregate_xml(
                 xml_files, output_xml,
                 cell_regions_xml=os.path.join(self.project_dir, "images", "cell_reigons.xml"),
+                phases=load_phases(self.project_dir),
+                phase_signature=(
+                    phase_signature(load_phases(self.project_dir))
+                    if os.path.exists(settings_path(self.project_dir)) else None
+                ),
             )
         except ValueError as exc:
             messagebox.showerror("Selections Need Updating", str(exc), parent=self.root)
@@ -320,6 +442,7 @@ class ProjectGUI:
                 dataset_dir=self.project_dir,
                 include_otsu=False,
                 launch_ui=False,
+                phases=load_phases(self.project_dir),
             )
         except ValueError as exc:
             messagebox.showerror("Build Tracking XML", str(exc), parent=self.root)
@@ -338,7 +461,7 @@ class ProjectGUI:
         if not tracking_is_current(tracking_xml, cell_xml):
             messagebox.showerror(
                 "Tracking Data Stale",
-                "Raw CellClicker tracks changed. Reselect affected tracks, aggregate selections, and rebuild tracking review first.",
+                "Raw CellClicker tracks or phase selections changed. Aggregate selections and rebuild tracking review first.",
                 parent=self.root,
             )
             return None
@@ -485,8 +608,14 @@ class ProjectGUI:
             self.status_var.set(f"Deleted duplicate track {target.get('track_id')}; rebuild exports before training.")
             messagebox.showinfo("Duplicate Deleted", "Track deleted. Existing exports are stale; rebuild exports before training.", parent=self.root)
 
-        tk.Button(button_frame, text="Delete Track A", command=lambda: delete_selected("first")).pack(side=tk.LEFT)
-        tk.Button(button_frame, text="Delete Track B", command=lambda: delete_selected("second")).pack(side=tk.LEFT, padx=8)
+        add_tooltip(
+            tk.Button(button_frame, text="Delete Track A", command=lambda: delete_selected("first")),
+            "Delete Track A from the project. Existing exports will become stale.",
+        ).pack(side=tk.LEFT)
+        add_tooltip(
+            tk.Button(button_frame, text="Delete Track B", command=lambda: delete_selected("second")),
+            "Delete Track B from the project. Existing exports will become stale.",
+        ).pack(side=tk.LEFT, padx=8)
         tk.Button(button_frame, text="Close", command=dialog.destroy).pack(side=tk.RIGHT)
 
     def export_yolo_labels(self):
@@ -505,6 +634,21 @@ class ProjectGUI:
         self.status_var.set(f"Exported {len(labels_by_file)} YOLO label files to {output_dir}.")
         messagebox.showinfo("Export Complete", f"Exported {len(labels_by_file)} YOLO label files.")
 
+    def view_exported_dataset(self):
+        """Open a read-only preview of the current YOLO dataset export."""
+        if not self._require_project():
+            return
+        if not exported_labels_are_current(self.project_dir):
+            messagebox.showerror(
+                "Export Required",
+                "Export current YOLO labels before opening the final dataset viewer.",
+            )
+            return
+        try:
+            ExportedDatasetViewer(self.root, self.project_dir)
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            messagebox.showerror("Cannot Open Exported Dataset", str(exc))
+
     def export_coco_labels(self):
         if not self._require_project():
             return
@@ -517,6 +661,7 @@ class ProjectGUI:
             tracking_xml_path=tracking_xml,
             output_json_path=output_json_path,
             box_type=self.export_box_type_var.get(),
+            replace_output_directory=True,
         )
         self.status_var.set(
             f"Exported COCO annotations with {len(coco_data['annotations'])} boxes to {output_json_path}."

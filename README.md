@@ -30,6 +30,22 @@ The test suite requires no microscope hardware or downloads. The sample command 
 
 The blank sample is deliberately synthetic because an approved redistributable microscopy subset is not yet included. See [sample_data/README.md](sample_data/README.md) before treating it as anything other than an installation check.
 
+YOLO phase-model training is available from the unified CellClicker GUI or
+from the same versioned configuration on the command line:
+
+```powershell
+python train.py --config path\to\training.yaml
+```
+
+The GUI can load and save these files; see
+[`examples/yolo_training.example.yaml`](examples/yolo_training.example.yaml)
+and the [CellClicker interface guide](docs/cellclicker-interface-guide.md#7-train-a-phase-model-yolo11).
+
+For a frozen, paper-oriented evaluation on a separately held-out internal data
+set, see [the benchmark workflow](docs/benchmarking.md). It writes outputs to
+`D:\CelFDriveBenchmark\runs` by default and does not modify source labels or
+paper files.
+
 ## Prediction configuration
 
 `celfdrive_predict.yaml` is the default configuration. It defines the model weights, preprocessing, tiling, coordinate conversion, logging, capture profile, and class-specific confidence thresholds. `run_config_gui.py` provides an editor for these settings:
@@ -38,7 +54,9 @@ The blank sample is deliberately synthetic because an approved redistributable m
 python run_config_gui.py
 ```
 
-The default configuration assumes commands are run from the repository root and uses the bundled weights at `Models/Trained/weights/best.pt`. This is a simple relative path, not a value users normally need to edit. In the editor, set **CelFDrive project root** to the folder cloned from GitHub; the default `Logging` directory is created beneath it. Change `model.weights_path` only when using a different model; configure capture-script names and class settings for the local experiment. Do not edit Python globals to configure a workflow.
+The default configuration assumes commands are run from the repository root and uses the bundled 99.99-percentile YOLO11x weights at `Models/yolo11x_p99p99_bg05/weights/best.pt`. This is a simple relative path, not a value users normally need to edit. In the editor, set **CelFDrive project root** to the folder cloned from GitHub; the default `Logging` directory is created beneath it. Configure capture-script names and class settings for the local experiment. Do not edit Python globals to configure a workflow.
+
+Standard tiling remains the default inference mode. The Image tab also exposes an optional SAHI mode with validated confidence, slice-size, overlap, batch-size, and class-aware IOU merge settings. See [`examples/max_projection_sahi`](examples/max_projection_sahi) for an executed four-position, three-Z-plane maximum-projection example using 0.315 µm/pixel, SAHI confidence 0.5, and merge IOU 0.1.
 
 In the **High Resolution Imaging** tab, the SlideBook postscan script must have the same name as `profile.highres_script`. Detection classes use a per-class minimum confidence; capture priority `0` runs first and `-1` disables a class without deleting it.
 
@@ -95,7 +113,7 @@ get_target_location(
 
 `X`, `Y`, and `Z` are stage positions; `image` must be a montage stack of shape `(height, width, position)`. Pixel spacing and offsets are in micrometres; stage directions are `1` or `-1`. The wrapper retains `z_spacing` and `z_stage_direction` for compatibility, although two-dimensional target conversion does not use them. Both APIs return `(count, X, Y, Z, scripts, names, comments)` for use by the capture workflow.
 
-The current stage conversion is specific to the existing 3i conventions. The legacy `LLSM` flag still inverts Y direction when configured. `tiling.overlap_px` now controls tile overlap; same-class detections whose centres are within `tiling.deduplication_tolerance_px` are de-duplicated before coordinate conversion. Validate coordinates on the target microscope before acquiring data.
+The current stage conversion is specific to the existing 3i conventions. The legacy `LLSM` flag still inverts Y direction when configured. In standard mode, `tiling.overlap_px` controls tile overlap and same-class detections whose centres are within `tiling.deduplication_tolerance_px` are de-duplicated before coordinate conversion. SAHI mode instead performs class-aware greedy NMM in full-image coordinates using its configured IOU threshold. Validate coordinates on the target microscope before acquiring data.
 
 ## Annotation and training tools
 
@@ -123,7 +141,7 @@ python run_conversion.py
 
 Set the phase names in `run_selector.py` and the dataset/user values in `run_conversion.py` for the experiment. CellSelector opens an interactive GUI, so its selection workflow must be checked manually. The entry point now forwards the configured phase list correctly.
 
-`train.py` is the current YOLO training entry point. Its dataset path, output name, device, and hyperparameters are experiment-specific; copy it or replace those values with a versioned experiment configuration before training.
+`train.py` is the configuration-driven YOLO training entry point. Pass a schema-versioned YAML file with `--config`, using `examples/yolo_training.example.yaml` as the starting template; `--name` can override only the run name for one invocation. The command-line and GUI entry points share the same validation, dataset preparation, training and held-out-test evaluation workflow.
 
 ## Microscope integration and limitations
 

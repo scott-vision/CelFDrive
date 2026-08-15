@@ -1,13 +1,26 @@
-"""Example experiment-specific Ultralytics training invocation.
+"""Run reproducible CelFDrive YOLO training from a versioned YAML config."""
 
-Copy this script and replace the dataset, output, device, and hyperparameter
-values for a versioned experiment; importing it starts a training run.
-"""
+import argparse
+from copy import deepcopy
 
-from ultralytics import YOLO
+from CellClicker.yolo_training import load_training_config, run_training_config
 
-model = YOLO('Models/Base/yolov9c.pt')  
-dropout = 0.0
-device = [0]
-# Train the model in parralel using export MKL_SERVICE_FORCE_INTEL=1
-results = model.train(imgsz=640, batch=32, epochs=150, patience=50, mosaic=0.0, flipud =0.5, dropout =dropout,  data="Yaml/ScottLabelsV9_0418VAL_40xnoval.yaml", project="yolov9", name=f"20240512_ScottlabelsV9_40xnoval_{str(dropout)}_",  device=device)
+
+def main(argv=None):
+    """Validate a training configuration and execute the shared workflow."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", required=True, help="Path to a schema-versioned training YAML file.")
+    parser.add_argument("--name", help="Override run.name without modifying the reusable YAML file.")
+    args = parser.parse_args(argv)
+
+    config = load_training_config(args.config)
+    if args.name is not None:
+        config = deepcopy(config)
+        config["run"]["name"] = args.name
+    result = run_training_config(config)
+    print(result["run_dir"])
+    return result
+
+
+if __name__ == "__main__":
+    main()

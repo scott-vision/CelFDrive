@@ -32,7 +32,7 @@ def valid_config():
     return {
         "project": {"repo_path": "."},
         "model": {
-            "weights_path": "Models/Trained/weights/best.pt",
+            "weights_path": "Models/yolo11x_p99p99_bg05/weights/best.pt",
             "backend": "ultralytics_yolo",
             "suppress_stdout": True,
         },
@@ -48,6 +48,16 @@ def valid_config():
             "input_channel": {"mode": "first_channel_if_rgb"},
             "top_clip_percentile": 0.01,
             "normalize_min_max": True,
+        },
+        "inference": {
+            "mode": "standard",
+            "sahi": {
+                "confidence_threshold": 0.5,
+                "slice_size_px": 640,
+                "overlap_ratio": 0.25,
+                "tile_batch_size": 6,
+                "merge_iou_threshold": 0.1,
+            },
         },
         "tiling": {
             "enabled": True,
@@ -104,6 +114,25 @@ def test_validate_prediction_config_accepts_a_valid_postscan_profile():
     validate_prediction_config(valid_config())
 
 
+def test_editor_migrates_missing_inference_settings_to_standard_sahi_defaults():
+    config = valid_config()
+    del config["inference"]
+    editor = ConfigEditor.__new__(ConfigEditor)
+
+    editor.migrate_config(config)
+
+    assert config["inference"] == {
+        "mode": "standard",
+        "sahi": {
+            "confidence_threshold": 0.5,
+            "slice_size_px": 640,
+            "overlap_ratio": 0.25,
+            "tile_batch_size": 6,
+            "merge_iou_threshold": 0.1,
+        },
+    }
+
+
 @pytest.mark.parametrize(
     ("update", "message"),
     [
@@ -118,6 +147,12 @@ def test_validate_prediction_config_accepts_a_valid_postscan_profile():
         (lambda config: config["slidebook"].update({"objective_offset_um": {"x": 1, "y": 1}}), "x, y, and z"),
         (lambda config: config["slidebook"].update({"python_environment": "bad\"name"}), "quotes"),
         (lambda config: config["profile"].update({"name_template": "{unknown}"}), "may only use"),
+        (lambda config: config["inference"].update({"mode": "unknown"}), "inference.mode"),
+        (lambda config: config["inference"]["sahi"].update({"confidence_threshold": 1.1}), "confidence_threshold"),
+        (lambda config: config["inference"]["sahi"].update({"slice_size_px": 0}), "slice_size_px"),
+        (lambda config: config["inference"]["sahi"].update({"overlap_ratio": 1.0}), "overlap_ratio"),
+        (lambda config: config["inference"]["sahi"].update({"tile_batch_size": 0}), "tile_batch_size"),
+        (lambda config: config["inference"]["sahi"].update({"merge_iou_threshold": -0.1}), "merge_iou_threshold"),
     ],
 )
 def test_validate_prediction_config_rejects_invalid_high_resolution_settings(update, message):

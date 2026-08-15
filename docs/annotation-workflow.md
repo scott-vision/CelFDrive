@@ -68,12 +68,21 @@ miniseries. Export requires every referenced image to be below the selected
 project's `images/` directory; CelFDrive raises an actionable error if the
 tracking XML metadata does not match the project.
 
-The YOLO training window is optional. It expects each selected project to have
+The YOLO training window is optional. It accepts explicit project-folder lists
+for training, validation, and held-out test splits, and expects each selected project to have
 `tracking_review.xml` and exported YOLO labels. It creates `labels/` inside
-each selected project and a dataset YAML at the location chosen by the user.
+each selected project and a dataset YAML beneath the selected output root.
 SAM2 and training require the optional `ultralytics` dependency; SAM2 also
 requires a compatible CPU or CUDA PyTorch installation. Model weights and
-datasets are never bundled with this repository.
+datasets are never bundled with this repository. After training, it evaluates
+the best checkpoint on the held-out test split and records those metrics in the
+run summary.
+
+The training window can load and save the complete setup as a versioned YAML
+configuration. The same file can be run headlessly with `python train.py
+--config path/to/training.yaml`; use `--name` to override the saved run name.
+Relative paths are resolved from the configuration file, and every successful
+run saves a resolved `training_config.yaml` snapshot in its run directory.
 
 ## Cell tightener
 

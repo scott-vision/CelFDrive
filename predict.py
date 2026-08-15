@@ -131,6 +131,14 @@ def migrate_predict_config(raw_config):
     tiling = raw_config.setdefault("tiling", {})
     tiling.setdefault("overlap_px", 0)
     tiling.setdefault("deduplication_tolerance_px", 1.0)
+    inference = raw_config.setdefault("inference", {})
+    inference.setdefault("mode", "standard")
+    sahi = inference.setdefault("sahi", {})
+    sahi.setdefault("confidence_threshold", 0.5)
+    sahi.setdefault("slice_size_px", 640)
+    sahi.setdefault("overlap_ratio", 0.25)
+    sahi.setdefault("tile_batch_size", 6)
+    sahi.setdefault("merge_iou_threshold", 0.1)
 
 
 def get_config():
@@ -554,6 +562,108 @@ def run_model_inference(img, conf):
     raise ValueError(f"Unsupported model backend: {backend}")
 
 
+def run_sahi_inference(img, sahi_config):
+    """Run batched SAHI slicing and class-aware IOU merging on one image.
+
+    Parameters
+    ----------
+    img : numpy.ndarray
+        Normalized two-dimensional ``uint8`` image.
+    sahi_config : mapping
+        Validated SAHI inference settings from the prediction configuration.
+
+    Returns
+    -------
+    list[list]
+        ``[class_id, x, y, width, height, confidence]`` boxes in full-image
+        pixel coordinates after greedy non-maximum merging.
+    """
+    from sahi.postprocess.combine import GreedyNMMPostprocess
+    from sahi.prediction import ObjectPrediction
+    from sahi.slicing import slice_image
+
+    slice_size = _positive_integer(sahi_config["slice_size_px"], "inference.sahi.slice_size_px")
+    tile_batch_size = _positive_integer(sahi_config["tile_batch_size"], "inference.sahi.tile_batch_size")
+    overlap_ratio = _finite_number(sahi_config["overlap_ratio"], "inference.sahi.overlap_ratio")
+    confidence = _finite_number(
+        sahi_config["confidence_threshold"], "inference.sahi.confidence_threshold"
+    )
+    merge_iou = _finite_number(
+        sahi_config["merge_iou_threshold"], "inference.sahi.merge_iou_threshold"
+    )
+    if not 0 <= confidence <= 1:
+        raise ValueError("inference.sahi.confidence_threshold must be between 0 and 1")
+    if not 0 <= overlap_ratio < 1:
+        raise ValueError("inference.sahi.overlap_ratio must be in [0, 1)")
+    if not 0 <= merge_iou <= 1:
+        raise ValueError("inference.sahi.merge_iou_threshold must be between 0 and 1")
+
+    rgb_image = np.repeat(img[:, :, np.newaxis], 3, axis=2)
+    slices = slice_image(
+        rgb_image,
+        slice_height=slice_size,
+        slice_width=slice_size,
+        overlap_height_ratio=overlap_ratio,
+        overlap_width_ratio=overlap_ratio,
+        auto_slice_resolution=False,
+    )
+    current_model = get_model()
+    object_predictions = []
+    for start in range(0, len(slices), tile_batch_size):
+        batch = slices[start:start + tile_batch_size]
+        tile_images = [item["image"][:, :, ::-1] for item in batch]
+        results = current_model.predict(
+            tile_images,
+            imgsz=slice_size,
+            conf=confidence,
+            batch=len(batch),
+            verbose=False,
+        )
+        for item, result in zip(batch, results):
+            shift_x, shift_y = item["starting_pixel"]
+            for box, score, class_id in zip(
+                result.boxes.xyxy.cpu().numpy(),
+                result.boxes.conf.cpu().numpy(),
+                result.boxes.cls.cpu().numpy().astype(int),
+            ):
+                full_box = [
+                    float(box[0] + shift_x),
+                    float(box[1] + shift_y),
+                    float(box[2] + shift_x),
+                    float(box[3] + shift_y),
+                ]
+                object_predictions.append(
+                    ObjectPrediction(
+                        bbox=full_box,
+                        category_id=int(class_id),
+                        category_name=str(current_model.names[int(class_id)]),
+                        score=float(score),
+                        shift_amount=[0, 0],
+                        full_shape=[img.shape[0], img.shape[1]],
+                    )
+                )
+
+    postprocess = GreedyNMMPostprocess(
+        match_threshold=merge_iou,
+        match_metric="IOU",
+        class_agnostic=False,
+    )
+    detections = []
+    for prediction in postprocess(object_predictions):
+        box = prediction.bbox
+        detections.append(
+            [
+                int(prediction.category.id),
+                float(box.minx),
+                float(box.miny),
+                float(box.maxx - box.minx),
+                float(box.maxy - box.miny),
+                float(prediction.score.value),
+            ]
+        )
+    return detections
+
+
 def ultralytics_results_to_detections(results, x_offset, y_offset):
     """Convert Ultralytics result objects to pixel detection records."""
     if len(results[0].boxes.xyxy) == 0:
@@ -569,7 +679,8 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
     raw_img : numpy.ndarray
         Image of shape ``(height, width)`` or ``(height, width, channel)``.
     conf : float, optional
-        Model inference threshold; defaults to the lowest enabled class limit.
+        Model inference threshold. Standard mode defaults to the lowest enabled
+        class limit; SAHI mode defaults to its configured confidence threshold.
     save_path : path-like, optional
         Plot destination when ``plot`` is true.
     class_info : dict[int, tuple[str, float, int]], optional
@@ -586,33 +697,43 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
     cfg = get_config()
     if class_info is None:
         class_info = get_class_info(cfg["profile"])
-    if conf is None:
-        conf = get_inference_confidence(class_info)
 
     processed_img = preprocess_image(raw_img)
-    split_images = split_image(processed_img)
-    results = []
+    inference_cfg = cfg.get("inference", {"mode": "standard"})
+    inference_mode = inference_cfg.get("mode", "standard")
+    if inference_mode == "sahi":
+        sahi_config = dict(inference_cfg["sahi"])
+        if conf is not None:
+            sahi_config["confidence_threshold"] = conf
+        results = run_sahi_inference(processed_img, sahi_config)
+    elif inference_mode == "standard":
+        if conf is None:
+            conf = get_inference_confidence(class_info)
+        split_images = split_image(processed_img)
+        results = []
 
-    for img, x_offset, y_offset in split_images:
-        img = np.repeat(img[:, :, np.newaxis], 3, axis=2)
+        for img, x_offset, y_offset in split_images:
+            img = np.repeat(img[:, :, np.newaxis], 3, axis=2)
 
-        if cfg["model"].get("suppress_stdout", True):
-            with open(os.devnull, 'w') as nullfile:
-                with contextlib.redirect_stdout(nullfile):
-                    results_split = run_model_inference(img, conf)
-        else:
-            results_split = run_model_inference(img, conf)
+            if cfg["model"].get("suppress_stdout", True):
+                with open(os.devnull, 'w') as nullfile:
+                    with contextlib.redirect_stdout(nullfile):
+                        results_split = run_model_inference(img, conf)
+            else:
+                results_split = run_model_inference(img, conf)
 
-        for detection in results_split:
-            detection[1] += x_offset
-            detection[2] += y_offset
-        results.extend(results_split)
+            for detection in results_split:
+                detection[1] += x_offset
+                detection[2] += y_offset
+            results.extend(results_split)
 
-    tiling_cfg = cfg["tiling"]
-    results = deduplicate_detections(
-        results,
-        tiling_cfg.get("deduplication_tolerance_px", 1.0),
-    )
+        tiling_cfg = cfg["tiling"]
+        results = deduplicate_detections(
+            results,
+            tiling_cfg.get("deduplication_tolerance_px", 1.0),
+        )
+    else:
+        raise ValueError("inference.mode must be 'standard' or 'sahi'")
 
     if plot:
         if save_path is None:

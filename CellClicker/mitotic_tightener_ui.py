@@ -14,6 +14,17 @@ from .mitotic_tightener import (
     summarise_projects,
     train_tightener_model,
 )
+from .tooltips import add_tooltip
+
+
+TIGHTENER_SETTING_TOOLTIPS = {
+    "Output root": "Directory where tightener datasets, model runs, and evaluation files will be written.",
+    "Run name": "Unique name for this tightener training run.",
+    "Epochs": "Maximum number of complete passes through the training dataset.",
+    "Batch": "Samples processed per training step. Reduce this if GPU memory is exhausted.",
+    "Patience": "Stop after this many epochs without validation improvement.",
+    "Device": "Ultralytics device, such as 0 for the first GPU or cpu.",
+}
 
 
 SETTINGS_FORMAT_VERSION = 1
@@ -82,6 +93,12 @@ class MitoticTightenerTrainingUI:
             panel.grid(row=0, column=column, sticky="nsew", padx=4)
             split_frame.grid_columnconfigure(column, weight=1)
             box = tk.Listbox(panel, height=8, width=42, exportselection=False)
+            split_guidance = {
+                "train": "Projects whose reviewed tightens are used to train the box-refinement model.",
+                "val": "Projects used to measure tightener performance during training.",
+                "test": "Independent projects reserved for final tightener evaluation.",
+            }
+            add_tooltip(box, split_guidance[split])
             box.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
             self.listboxes[split] = box
             actions = tk.Frame(panel); actions.pack(fill=tk.X, padx=6, pady=(0, 4))
@@ -97,14 +114,21 @@ class MitoticTightenerTrainingUI:
         self._setting(settings, 3, "Batch", self.batch_var)
         self._setting(settings, 4, "Patience", self.patience_var)
         self._setting(settings, 5, "Device", self.device_var)
-        tk.Checkbutton(settings, text="Train with phase classes", variable=self.class_aware_var).grid(
-            row=6, column=1, sticky=tk.W, padx=6, pady=3
+        class_aware = tk.Checkbutton(settings, text="Train with phase classes", variable=self.class_aware_var)
+        add_tooltip(
+            class_aware,
+            "Enable only when every project uses exactly the same ordered phase mapping.",
         )
+        class_aware.grid(row=6, column=1, sticky=tk.W, padx=6, pady=3)
         action = tk.Frame(top); action.pack(fill=tk.X, pady=(0, 8))
         tk.Button(action, text="Refresh Summary", command=self.refresh_counts).pack(side=tk.LEFT)
         tk.Button(action, text="Save Settings", command=self.save_settings).pack(side=tk.LEFT, padx=(8, 0))
         tk.Button(action, text="Load Settings", command=self.load_settings).pack(side=tk.LEFT, padx=4)
         self.train_button = tk.Button(action, text="Prepare And Train YOLO11n", command=self.start_training)
+        add_tooltip(
+            self.train_button,
+            "Build the crop dataset, train the tightener, and evaluate the best checkpoint.",
+        )
         self.train_button.pack(side=tk.LEFT, padx=8)
         self.progress_bar = ttk.Progressbar(action, maximum=1, variable=self.progress_var)
         self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
@@ -115,7 +139,9 @@ class MitoticTightenerTrainingUI:
 
     def _setting(self, parent, row, label, variable, browse=None):
         tk.Label(parent, text=label + ":").grid(row=row, column=0, sticky=tk.W, padx=6, pady=3)
-        tk.Entry(parent, textvariable=variable).grid(row=row, column=1, sticky="ew", padx=6, pady=3)
+        entry = tk.Entry(parent, textvariable=variable)
+        add_tooltip(entry, TIGHTENER_SETTING_TOOLTIPS[label])
+        entry.grid(row=row, column=1, sticky="ew", padx=6, pady=3)
         if browse:
             tk.Button(parent, text="Browse", command=browse).grid(row=row, column=2, padx=6, pady=3)
 

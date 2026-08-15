@@ -5,7 +5,12 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 from .tracking_xml import read_tracking_xml, write_tracking_data
-from .workflow_state import annotator_selection_files, raw_revision_fingerprint, raw_track_revisions
+from .workflow_state import (
+    annotator_selection_files,
+    raw_revision_fingerprint,
+    raw_track_revisions,
+    selection_fingerprint,
+)
 
 
 def _remove_selection_entry(tree, track_key):
@@ -138,6 +143,11 @@ def tracking_is_current(tracking_xml, cell_regions_xml):
     if not os.path.isfile(tracking_xml):
         return False
     fingerprint = read_tracking_xml(tracking_xml).get("metadata", {}).get("raw_revision_fingerprint")
+    selection_digest = read_tracking_xml(tracking_xml).get("metadata", {}).get("selection_fingerprint")
+    if selection_digest is not None:
+        selections_dir = os.path.dirname(os.path.abspath(tracking_xml))
+        if selection_digest != selection_fingerprint(annotator_selection_files(selections_dir)):
+            return False
     if fingerprint is None:
         # Projects built before revision provenance are safe until a raw series
         # is actually extended: all legacy raw tracks have revision zero.

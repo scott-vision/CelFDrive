@@ -38,7 +38,7 @@ def update_xml(file_name, series_id, selected_index, xml_file_name):
     # Save the updated XML to the file
     tree.write(xml_file_name)
 
-def update_xml_multiclass(file_name, series_id, selected_indices, xml_file_name, phases, selection_revision=0):
+def update_xml_multiclass(file_name, series_id, selected_indices, xml_file_name, phases, selection_revision=0, phase_signature=None):
     """Upsert selected indices for ordered phase names in a user XML document."""
     # Parse the existing XML file
     tree = ET.parse(xml_file_name)
@@ -55,19 +55,28 @@ def update_xml_multiclass(file_name, series_id, selected_indices, xml_file_name,
         # Check if the file and series_id match
         if file_element is not None and series_id_element is not None and \
            file_element.text == file_name and series_id_element.text == str(series_id):
-            data_entry.set("selection_revision", str(selection_revision))
+            is_complete = all(phase in selected_indices for phase in phases)
+            if is_complete:
+                data_entry.set("selection_revision", str(selection_revision))
+                if phase_signature:
+                    data_entry.set("phase_signature", phase_signature)
             # Update the selected_index values for each phase
             for phase in phases:
                 phase_element = data_entry.find(phase)
+                phase_value = selected_indices.get(phase)
+                if phase_value is None:
+                    continue
                 if phase_element is None:
                     phase_element = ET.SubElement(data_entry, phase)
-                phase_value = selected_indices.get(phase, 'skipped')
                 phase_element.text = str(-1 if phase_value in ['skipped', 'blurry'] else phase_value)
             break
     else:
         # If no matching entry was found, create a new one
         data_entry = ET.Element('DataEntry')
-        data_entry.set("selection_revision", str(selection_revision))
+        if all(phase in selected_indices for phase in phases):
+            data_entry.set("selection_revision", str(selection_revision))
+            if phase_signature:
+                data_entry.set("phase_signature", phase_signature)
         file_element = ET.SubElement(data_entry, 'PathName')
         series_id_element = ET.SubElement(data_entry, 'SeriesID')
         file_element.text = file_name
@@ -76,7 +85,10 @@ def update_xml_multiclass(file_name, series_id, selected_indices, xml_file_name,
         # Create elements for each phase
         for phase in phases:
             phase_element = ET.SubElement(data_entry, phase)
-            phase_value = selected_indices.get(phase, 'skipped')  # Use 'skipped' as default if phase not found
+            phase_value = selected_indices.get(phase)
+            if phase_value is None:
+                data_entry.remove(phase_element)
+                continue
             phase_element.text = str(-1 if phase_value in ['skipped', 'blurry'] else phase_value)
 
         root.append(data_entry)
@@ -92,7 +104,7 @@ def store_results(images_dict, selected_indicies, name_xml):
         print(file_name, series_id, selected_index, name_xml)
         update_xml(file_name, series_id, selected_index, name_xml)    
 
-def store_results_multiclass(images_dict, selected_indicies, name_xml, phases, revisions=None):
+def store_results_multiclass(images_dict, selected_indicies, name_xml, phases, revisions=None, phase_signature=None):
     """Persist phase selections for every image-series entry in ``images_dict``."""
 
     revisions = revisions or {}
@@ -101,6 +113,7 @@ def store_results_multiclass(images_dict, selected_indicies, name_xml, phases, r
         update_xml_multiclass(
             file_name, series_id, selected_index_dict, name_xml, phases,
             selection_revision=revisions.get((file_name, str(series_id)), 0),
+            phase_signature=phase_signature,
         )
 
 

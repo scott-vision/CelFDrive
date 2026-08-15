@@ -208,7 +208,7 @@ def export_tracking_xml_to_yolo(tracking_xml_path, output_dir, box_type="preferr
     return labels_by_file
 
 
-def export_tracking_xml_to_coco(tracking_xml_path, output_json_path, box_type="preferred"):
+def export_tracking_xml_to_coco(tracking_xml_path, output_json_path, box_type="preferred", replace_output_directory=False):
     """Export selected tracking boxes as a COCO annotation JSON document.
 
     Pixel-space COCO ``bbox`` values are ``[x_min, y_min, width, height]``;
@@ -284,14 +284,25 @@ def export_tracking_xml_to_coco(tracking_xml_path, output_json_path, box_type="p
     }
 
     output_json_path = os.path.normpath(output_json_path)
-    output_directory = os.path.dirname(output_json_path)
-    if output_directory:
+    output_directory = os.path.dirname(output_json_path) or os.curdir
+    output_basename = os.path.basename(output_json_path)
+    if replace_output_directory:
+        parent_directory = os.path.dirname(output_directory) or os.curdir
+        staging_dir = tempfile.mkdtemp(prefix="celfdrive-coco-", dir=parent_directory)
+        temporary_path = os.path.join(staging_dir, output_basename)
+        with open(temporary_path, "w", encoding="utf-8") as handle:
+            json.dump(coco_data, handle, indent=2)
+        write_export_manifest(staging_dir, tracking_xml_path, box_type, "coco")
+        if os.path.isdir(output_directory):
+            shutil.rmtree(output_directory)
+        os.replace(staging_dir, output_directory)
+    else:
         os.makedirs(output_directory, exist_ok=True)
-    temporary_path = output_json_path + ".tmp"
-    with open(temporary_path, "w", encoding="utf-8") as handle:
-        json.dump(coco_data, handle, indent=2)
-    os.replace(temporary_path, output_json_path)
-    write_export_manifest(output_directory or os.curdir, tracking_xml_path, box_type, "coco")
+        temporary_path = output_json_path + ".tmp"
+        with open(temporary_path, "w", encoding="utf-8") as handle:
+            json.dump(coco_data, handle, indent=2)
+        os.replace(temporary_path, output_json_path)
+        write_export_manifest(output_directory, tracking_xml_path, box_type, "coco")
 
     return coco_data
 

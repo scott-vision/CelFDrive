@@ -108,6 +108,26 @@ def validate_prediction_config(config):
         raise ValueError("preprocessing.top_clip_percentile must be in [0, 100)")
     _boolean(preprocessing.get("normalize_min_max"), "preprocessing.normalize_min_max")
 
+    inference = _mapping(config.get("inference"), "inference")
+    if inference.get("mode") not in {"standard", "sahi"}:
+        raise ValueError("inference.mode must be 'standard' or 'sahi'")
+    sahi = _mapping(inference.get("sahi"), "inference.sahi")
+    confidence_threshold = _finite_float(
+        sahi.get("confidence_threshold"), "inference.sahi.confidence_threshold"
+    )
+    if not 0 <= confidence_threshold <= 1:
+        raise ValueError("inference.sahi.confidence_threshold must be between 0 and 1")
+    _positive_integer(sahi.get("slice_size_px"), "inference.sahi.slice_size_px")
+    overlap_ratio = _finite_float(sahi.get("overlap_ratio"), "inference.sahi.overlap_ratio")
+    if not 0 <= overlap_ratio < 1:
+        raise ValueError("inference.sahi.overlap_ratio must be in [0, 1)")
+    _positive_integer(sahi.get("tile_batch_size"), "inference.sahi.tile_batch_size")
+    merge_iou_threshold = _finite_float(
+        sahi.get("merge_iou_threshold"), "inference.sahi.merge_iou_threshold"
+    )
+    if not 0 <= merge_iou_threshold <= 1:
+        raise ValueError("inference.sahi.merge_iou_threshold must be between 0 and 1")
+
     tiling = _mapping(config.get("tiling"), "tiling")
     _boolean(tiling.get("enabled"), "tiling.enabled")
     tile_size_px = _positive_integer(tiling.get("tile_size_px"), "tiling.tile_size_px")
@@ -456,6 +476,14 @@ class ConfigEditor:
             slidebook["objective_before_target_search"] = slidebook.pop("pre_callback_objective", "")
         slidebook.setdefault("highres_objective", "20x Air")
         slidebook.setdefault("objective_offset_um", {"x": 0.0, "y": 0.0, "z": 0.0})
+        inference = config.setdefault("inference", {})
+        inference.setdefault("mode", "standard")
+        sahi = inference.setdefault("sahi", {})
+        sahi.setdefault("confidence_threshold", 0.5)
+        sahi.setdefault("slice_size_px", 640)
+        sahi.setdefault("overlap_ratio", 0.25)
+        sahi.setdefault("tile_batch_size", 6)
+        sahi.setdefault("merge_iou_threshold", 0.1)
 
     def build_ui(self):
         """Create the notebook tabs and bottom action bar.
@@ -830,7 +858,57 @@ class ConfigEditor:
         self.add_field(preprocessing, 2, "Top clip percentile", ["preprocessing", "top_clip_percentile"], float)
         self.add_field(preprocessing, 3, "Normalize min/max", ["preprocessing", "normalize_min_max"], bool)
 
-        tiling = self.add_section(parent, "Tiling", 1)
+        inference = self.add_section(parent, "Inference", 1)
+        self.add_dropdown(
+            inference,
+            0,
+            "Mode",
+            ["inference", "mode"],
+            ["standard", "sahi"],
+        )
+        self.add_field(
+            inference,
+            1,
+            "SAHI confidence threshold",
+            ["inference", "sahi", "confidence_threshold"],
+            float,
+        )
+        self.add_field(
+            inference,
+            2,
+            "SAHI slice size px",
+            ["inference", "sahi", "slice_size_px"],
+            int,
+        )
+        self.add_field(
+            inference,
+            3,
+            "SAHI overlap ratio",
+            ["inference", "sahi", "overlap_ratio"],
+            float,
+        )
+        self.add_field(
+            inference,
+            4,
+            "SAHI tile batch size",
+            ["inference", "sahi", "tile_batch_size"],
+            int,
+        )
+        self.add_field(
+            inference,
+            5,
+            "SAHI merge IOU threshold",
+            ["inference", "sahi", "merge_iou_threshold"],
+            float,
+        )
+        self.add_hint(
+            inference,
+            6,
+            "SAHI settings apply only when inference mode is sahi. Merging is class-aware and uses IOU.",
+            columnspan=3,
+        )
+
+        tiling = self.add_section(parent, "Standard Tiling", 2)
         self.add_field(tiling, 0, "Enabled", ["tiling", "enabled"], bool)
         self.add_field(tiling, 1, "Tile size px", ["tiling", "tile_size_px"], int)
         self.add_dropdown(

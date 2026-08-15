@@ -8,6 +8,7 @@ from PIL import Image, ImageTk
 
 from .tracking_sam2 import DEFAULT_SAM2_DEVICE, DEFAULT_SAM2_MODEL, predict_sam2_merged_box_from_points
 from .tracking_xml import read_tracking_xml, write_tracking_data
+from .tooltips import add_tooltip
 
 
 BOX_COLORS = {
@@ -98,10 +99,21 @@ class TrackingReviewUI:
         top_frame.pack(side=tk.TOP, fill=tk.X, padx=8, pady=8)
 
         tk.Button(top_frame, text="Open Tracking XML", command=self.open_tracking_xml).pack(side=tk.LEFT)
-        tk.Button(top_frame, text="Save", command=self.save_tracking_xml).pack(side=tk.LEFT, padx=4)
+        add_tooltip(
+            tk.Button(top_frame, text="Save & Mark Reviewed", command=self.save_tracking_xml),
+            "Persist preferred boxes and classes, and mark the reviewed tracks as current.",
+        ).pack(side=tk.LEFT, padx=4)
         self.sam2_points_btn = tk.Button(top_frame, text="SAM2 Points To Box", command=self.start_sam2_points_mode)
+        add_tooltip(
+            self.sam2_points_btn,
+            "Choose one tile, then place positive points inside the target cell.",
+        )
         self.sam2_points_btn.pack(side=tk.LEFT, padx=(16, 4))
         self.sam2_done_btn = tk.Button(top_frame, text="Done", command=self.finish_sam2_points_mode, state=tk.DISABLED)
+        add_tooltip(
+            self.sam2_done_btn,
+            "Generate a tightened box from these points and make it preferred.",
+        )
         self.sam2_done_btn.pack(side=tk.LEFT, padx=4)
         self.sam2_cancel_btn = tk.Button(
             top_frame,
@@ -132,65 +144,85 @@ class TrackingReviewUI:
         self.show_box_type_vars["sam2"] = tk.BooleanVar(value=True)
         self.show_box_type_vars["yolo11_tightened"] = tk.BooleanVar(value=True)
         self.show_box_type_vars["tightened"] = tk.BooleanVar(value=True)
-        tk.Checkbutton(
+        original_filter = tk.Checkbutton(
             self.filter_button_frame,
             text="Original",
             variable=self.show_box_type_vars["original"],
             command=self.render_current_track,
-        ).pack(side=tk.LEFT, padx=(8, 4))
-        tk.Checkbutton(
+        )
+        add_tooltip(original_filter, "Show or hide original boxes. Visibility does not change which box is preferred.")
+        original_filter.pack(side=tk.LEFT, padx=(8, 4))
+        otsu_filter = tk.Checkbutton(
             self.filter_button_frame,
             text="Otsu",
             variable=self.show_box_type_vars["otsu"],
             command=self.render_current_track,
-        ).pack(side=tk.LEFT, padx=4)
-        tk.Checkbutton(
+        )
+        add_tooltip(otsu_filter, "Show or hide Otsu boxes. Visibility does not change which box is preferred.")
+        otsu_filter.pack(side=tk.LEFT, padx=4)
+        yolo_filter = tk.Checkbutton(
             self.filter_button_frame,
             text="YOLO11",
             variable=self.show_box_type_vars["yolo11_tightened"],
             command=self.render_current_track,
-        ).pack(side=tk.LEFT, padx=4)
-        tk.Checkbutton(
+        )
+        add_tooltip(yolo_filter, "Show or hide YOLO11 boxes. Visibility does not change which box is preferred.")
+        yolo_filter.pack(side=tk.LEFT, padx=4)
+        sam2_filter = tk.Checkbutton(
             self.filter_button_frame,
             text="SAM2",
             variable=self.show_box_type_vars["sam2"],
             command=self.render_current_track,
-        ).pack(side=tk.LEFT, padx=4)
-        tk.Checkbutton(
+        )
+        add_tooltip(sam2_filter, "Show or hide SAM2 boxes. Visibility does not change which box is preferred.")
+        sam2_filter.pack(side=tk.LEFT, padx=4)
+        tightened_filter = tk.Checkbutton(
             self.filter_button_frame,
             text="Tightened",
             variable=self.show_box_type_vars["tightened"],
             command=self.render_current_track,
-        ).pack(side=tk.LEFT, padx=4)
+        )
+        add_tooltip(tightened_filter, "Show or hide manually tightened boxes. Visibility does not change which box is preferred.")
+        tightened_filter.pack(side=tk.LEFT, padx=4)
 
         self.bulk_button_frame = tk.Frame(self.root)
         self.bulk_button_frame.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(0, 8))
         tk.Label(self.bulk_button_frame, text="Bulk select for current track:").pack(side=tk.LEFT)
-        tk.Button(
+        original_bulk = tk.Button(
             self.bulk_button_frame,
             text="All Original",
             command=lambda: self.set_all_preferred_box_type("original"),
-        ).pack(side=tk.LEFT, padx=(8, 4))
-        tk.Button(
+        )
+        add_tooltip(original_bulk, "Prefer original boxes throughout this track where they are available.")
+        original_bulk.pack(side=tk.LEFT, padx=(8, 4))
+        otsu_bulk = tk.Button(
             self.bulk_button_frame,
             text="All Otsu",
             command=lambda: self.set_all_preferred_box_type("otsu"),
-        ).pack(side=tk.LEFT, padx=4)
-        tk.Button(
+        )
+        add_tooltip(otsu_bulk, "Prefer Otsu boxes throughout this track where they are available.")
+        otsu_bulk.pack(side=tk.LEFT, padx=4)
+        yolo_bulk = tk.Button(
             self.bulk_button_frame,
             text="All YOLO11",
             command=lambda: self.set_all_preferred_box_type("yolo11_tightened"),
-        ).pack(side=tk.LEFT, padx=4)
-        tk.Button(
+        )
+        add_tooltip(yolo_bulk, "Prefer YOLO11 boxes throughout this track where they are available.")
+        yolo_bulk.pack(side=tk.LEFT, padx=4)
+        sam2_bulk = tk.Button(
             self.bulk_button_frame,
             text="All SAM2",
             command=lambda: self.set_all_preferred_box_type("sam2"),
-        ).pack(side=tk.LEFT, padx=4)
-        tk.Button(
+        )
+        add_tooltip(sam2_bulk, "Prefer SAM2 boxes throughout this track where they are available.")
+        sam2_bulk.pack(side=tk.LEFT, padx=4)
+        tightened_bulk = tk.Button(
             self.bulk_button_frame,
             text="All Tightened",
             command=lambda: self.set_all_preferred_box_type("tightened"),
-        ).pack(side=tk.LEFT, padx=4)
+        )
+        add_tooltip(tightened_bulk, "Prefer tightened boxes throughout this track where they are available.")
+        tightened_bulk.pack(side=tk.LEFT, padx=4)
 
         canvas_frame = tk.Frame(self.root)
         canvas_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=8, pady=8)
@@ -198,6 +230,10 @@ class TrackingReviewUI:
         canvas_frame.grid_columnconfigure(0, weight=1)
 
         self.track_canvas = tk.Canvas(canvas_frame, bg="#111111", highlightthickness=0)
+        add_tooltip(
+            self.track_canvas,
+            "Click a tile to make its box preferred. Drag an edge or corner handle to create a tightened box; green means preferred and blue dotted means focused.",
+        )
         self.track_scroll_x = tk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL, command=self.track_canvas.xview)
         self.track_scroll_y = tk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=self.track_canvas.yview)
         self.track_canvas.configure(xscrollcommand=self.track_scroll_x.set, yscrollcommand=self.track_scroll_y.set)
@@ -271,10 +307,17 @@ class TrackingReviewUI:
         self._focus_review_canvas()
 
     def save_tracking_xml(self):
+        """Persist review edits and complete the current track's review pass."""
         if not self.tracking_data or not self.tracking_xml_path:
             return
+        current = self.get_current_track()
+        if current and current.get("review_state") == "pending":
+            current["review_state"] = "reviewed"
         write_tracking_data(self.tracking_xml_path, self.tracking_data)
-        self.status_label.config(text=f"Saved tracking XML: {self.tracking_xml_path}")
+        self.render_current_track()
+        self.status_label.config(
+            text=f"Saved and marked current track reviewed: {self.tracking_xml_path}"
+        )
 
     def get_current_track(self):
         if not self.tracks:
@@ -299,6 +342,10 @@ class TrackingReviewUI:
         current = self.get_current_track()
         if current and current.get("review_state") == "pending":
             current["review_state"] = "reviewed"
+            # Advancing is the explicit review-completion action. Persist it
+            # immediately so closing the window cannot lose completed reviews.
+            if self.tracking_data and self.tracking_xml_path:
+                write_tracking_data(self.tracking_xml_path, self.tracking_data)
         self.track_index = min(len(self.tracks) - 1, self.track_index + 1)
         self.selected_tile = None
         self.focused_tile = None
@@ -446,7 +493,8 @@ class TrackingReviewUI:
             text=(
                 f"Track {self.track_index + 1}/{len(self.tracks)} "
                 f"({track['track_id']})  Series {track['series_id']}  Frames {len(timepoints)}  "
-                f"Review: {track.get('review_state', 'reviewed')}"
+                f"Review: {track.get('review_state', 'reviewed')}  |  "
+                f"Pending: {sum(item.get('review_state') == 'pending' for item in self.tracks)}"
             )
         )
 
@@ -510,6 +558,7 @@ class TrackingReviewUI:
             state="readonly",
             width=max(18, int(self.get_tile_width() / 11)),
         )
+        add_tooltip(class_combo, "Set the authoritative phase class for this frame.")
         current_value = self._get_current_class_value(timepoint)
         try:
             class_combo.current(class_values.index(current_value))

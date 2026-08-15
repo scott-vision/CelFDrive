@@ -92,6 +92,31 @@
 import os
 import xml.etree.ElementTree as ET
 import tkinter as tk
+from tkinter import messagebox
+
+from .workflow_state import RESERVED_SELECTION_FILENAMES
+
+
+def annotator_filename(name):
+    """Return a valid annotator selection filename, rejecting workflow-owned names."""
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise ValueError("Enter an annotator name.")
+    if f"{os.path.splitext(normalized_name)[0].lower()}.xml" in RESERVED_SELECTION_FILENAMES:
+        raise ValueError(
+            f"`{normalized_name}` is reserved for generated workflow data and cannot be an annotator name."
+        )
+    return f"{normalized_name}.xml"
+
+
+def available_annotator_names(xml_folder_path):
+    """Return existing annotator names, excluding generated workflow XML files."""
+    return sorted(
+        os.path.splitext(filename)[0]
+        for filename in os.listdir(xml_folder_path)
+        if filename.lower().endswith(".xml")
+        and filename.lower() not in RESERVED_SELECTION_FILENAMES
+    )
 
 class NameSelector:
     """Tk dialog that selects or creates the XML file for one annotator."""
@@ -122,7 +147,7 @@ class NameSelector:
         self.update_name_list()
 
     def create_xml_file(self, name):
-        file_name = f"{name}.xml"
+        file_name = annotator_filename(name)
         with open(os.path.join(self.xml_path, file_name), "wb") as file:
             root = ET.Element("Data")
             tree = ET.ElementTree(root)
@@ -135,17 +160,15 @@ class NameSelector:
             self.window.quit()  # This now only quits the main loop
 
     def add_new_name(self, new_name):
-        print(new_name)
-        if new_name:
+        try:
             self.create_xml_file(new_name)
             self.update_name_list()
-        else:
-            print("Please enter a new name.")
+        except ValueError as exc:
+            messagebox.showerror("Invalid Annotator Name", str(exc), parent=self.window)
 
     def update_name_list(self):
-        xml_files = [file.split(".")[0] for file in os.listdir(self.xml_path) if file.endswith(".xml")]
         self.name_listbox.delete(0, tk.END)
-        for name in xml_files:
+        for name in available_annotator_names(self.xml_path):
             self.name_listbox.insert(tk.END, name)
 
     def run(self):

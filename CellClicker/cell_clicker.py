@@ -13,11 +13,43 @@ from CellClicker.manageXML import (
     remove_entry_from_xml,
 )
 from CellClicker.clicker_utils import get_previous_image_name, get_relative_image_name, yolov5_to_xywh
+from CellClicker.tooltips import add_tooltip
+
+
+MINI_CLICKER_DISPLAY_SCALE = 3
+IMAGE_VIEWER_HELP_TEXT = (
+    "Keyboard shortcuts: Left Arrow = previous image; Right Arrow = next image; I = Inspect; "
+    "U = Update Progress; F = Finished (while the mini-clicker is open).\n\n"
+    "Navigate images with << and >> or by entering a frame number.\n\n"
+    "To start a track, drag a red box around a cell, then select Inspect. In the mini-clicker, "
+    "click the cell's position in each preceding image. Select Finished to stop early.\n\n"
+    "Existing tracks are green. Right-click a green box to extend that track earlier. Select the red X "
+    "on its final box to delete the entire track.\n\n"
+    "Use Update Progress after changing annotations outside this window."
+)
+
+
+def display_coordinate_to_roi_coordinate(coordinate, display_scale):
+    """Convert a mini-clicker display coordinate to an integer source ROI pixel."""
+    if display_scale <= 0:
+        raise ValueError("Mini-clicker display scale must be greater than zero.")
+    return coordinate // display_scale
+
+
+def centered_window_position(parent_x, parent_y, parent_width, parent_height, window_width, window_height):
+    """Return the top-left position that centers a child window over its parent."""
+    return (
+        parent_x + (parent_width - window_width) // 2,
+        parent_y + (parent_height - window_height) // 2,
+    )
 
 
 class ImageProcessor:
     """Load and normalize microscope image files for annotation display."""
-    def __init__(self, master, image_path, bbox, xml_path, series_id, next_class_id=0, anchor_path=None):
+    def __init__(
+        self, master, image_path, bbox, xml_path, series_id, next_class_id=0,
+        anchor_path=None, on_finished=None,
+    ):
         self.master = master
         self.image_path = image_path
         self.first_label = anchor_path or image_path
@@ -25,14 +57,24 @@ class ImageProcessor:
         self.xml_path = xml_path
         self.class_id = next_class_id
         self.series_id = series_id
+        self.on_finished = on_finished
+        self._ended = False
         
         # Create a new window for image processing
         self.image_window = Toplevel(self.master)
         self.image_window.title("Cell Clicker")
+        self.image_window.transient(self.master)
+        self.image_window.protocol("WM_DELETE_WINDOW", self.end_session)
+        self.image_window.bind("<f>", self.finish_hotkey)
+        self.image_window.bind("<F>", self.finish_hotkey)
 
         # Display area for images
-        self.canvas = tk.Canvas(self.image_window, width=200, height=200)
+        self.canvas = tk.Canvas(self.image_window, width=600, height=600)
         self.canvas.pack()
+        add_tooltip(
+            self.canvas,
+            "Click the centre of the same cell. Each click records a box and moves to the preceding frame.",
+        )
 
         # Status label
         self.status_label = Label(self.image_window, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
@@ -40,6 +82,10 @@ class ImageProcessor:
 
         # Button to manually end the session
         self.stop_button = Button(self.image_window, text="Finished", command=self.end_session)
+        add_tooltip(
+            self.stop_button,
+            "Stop tracing when the cell is absent or the series is complete. Shortcut: F.",
+        )
         self.stop_button.pack(side=tk.BOTTOM)
 
         # print("current series")
@@ -47,6 +93,32 @@ class ImageProcessor:
         
         # Load the initial image and display it
         self.display_roi()
+        self.center_over_master()
+        self.image_window.after_idle(self.focus_clicker)
+
+    def center_over_master(self):
+        """Place the mini-clicker at the center of the main Cell Clicker window."""
+        self.image_window.update_idletasks()
+        x, y = centered_window_position(
+            self.master.winfo_rootx(),
+            self.master.winfo_rooty(),
+            self.master.winfo_width(),
+            self.master.winfo_height(),
+            self.image_window.winfo_width(),
+            self.image_window.winfo_height(),
+        )
+        self.image_window.geometry(f"+{x}+{y}")
+
+    def focus_clicker(self):
+        """Ensure the new mini-clicker receives keyboard focus immediately."""
+        self.image_window.lift()
+        self.image_window.focus_force()
+        self.canvas.focus_set()
+
+    def finish_hotkey(self, event):
+        """End the current mini-clicker session when F is pressed."""
+        self.end_session()
+        return "break"
 
     def normalize_image(self, image):
         """ Normalizes an image to a range of [0, 255] and converts it to uint8 data type. """
@@ -81,10 +153,16 @@ class ImageProcessor:
         self.current_x, self.current_y = max(0, self.bbox['x'] - expand), max(0, self.bbox['y'] - expand)
         self.current_w = min(self.x_shape, self.current_x + self.bbox['width'] + 2*expand) - self.current_x
         self.current_h = min(self.y_shape, self.current_y + self.bbox['height'] + 2*expand) - self.current_y
-        self.canvas.config(width=self.current_w, height=self.current_h)
+        display_width = self.current_w * MINI_CLICKER_DISPLAY_SCALE
+        display_height = self.current_h * MINI_CLICKER_DISPLAY_SCALE
+        self.canvas.config(width=display_width, height=display_height)
         # print(self.current_x, self.current_y, self.current_w, self.current_h)
         roi = self.normalize_image(img[self.current_y:self.current_y+self.current_h, self.current_x:self.current_x+self.current_w])
-        self.image = ImageTk.PhotoImage(image=Image.fromarray(roi))
+        display_roi = Image.fromarray(roi).resize(
+            (display_width, display_height), Image.Resampling.NEAREST
+        )
+        self.image = ImageTk.PhotoImage(image=display_roi)
+        self.canvas.delete("all")
         self.canvas.create_image(0, 0, image=self.image, anchor=tk.NW)
 
 
@@ -96,7 +174,8 @@ class ImageProcessor:
 
     def click_event(self, event):
         """Handles mouse click events to calculate a new ROI centered on the clicked position."""
-        x, y = event.x, event.y
+        x = display_coordinate_to_roi_coordinate(event.x, MINI_CLICKER_DISPLAY_SCALE)
+        y = display_coordinate_to_roi_coordinate(event.y, MINI_CLICKER_DISPLAY_SCALE)
         # print(f"Clicked at: x={x}, y={y}")  # Placeholder for actual functionality
 
         # add the clicked x and y to the top left to get the global clicked val
@@ -131,8 +210,19 @@ class ImageProcessor:
 
 
     def end_session(self):
-        """Closes all OpenCV windows and quits the Tkinter Toplevel."""
+        """Close the mini-clicker and notify the Image Viewer that annotation ended."""
+        if self._ended:
+            return
+        self._ended = True
         self.image_window.destroy()
+        if self.on_finished is not None:
+            self.on_finished()
+        self.master.after_idle(self.restore_master_focus)
+
+    def restore_master_focus(self):
+        """Return keyboard focus to the Image Viewer after closing the mini-clicker."""
+        self.master.lift()
+        self.master.focus_force()
 
 
 
@@ -142,7 +232,11 @@ class ImageViewer:
         self.root = root
         self.root.title("Image Viewer")
         self.project_dir = os.path.normpath(project_dir) if project_dir else None
-        
+
+        help_frame = tk.Frame(self.root)
+        help_frame.pack(side=tk.TOP, fill=tk.X)
+        self.help_button = tk.Button(help_frame, text="?", width=2, command=self.show_help)
+        self.help_button.pack(side=tk.RIGHT, padx=8, pady=6)
 
         # Set up the frame for navigation buttons
         frame = tk.Frame(self.root)
@@ -160,12 +254,20 @@ class ImageViewer:
 
         # Buttons
         self.btn_inspect = tk.Button(frame, text="Update Progress", command=self.update_progress)
+        add_tooltip(
+            self.btn_inspect,
+            "Reload existing track overlays after annotations change. Shortcut: U.",
+        )
         self.btn_inspect.pack(side=tk.LEFT)
         self.btn_back = tk.Button(frame, text="<<", command=self.prev_image, state=tk.DISABLED)
         self.btn_back.pack(side=tk.LEFT)
         self.btn_forward = tk.Button(frame, text=">>", command=self.next_image)
         self.btn_forward.pack(side=tk.LEFT)
         self.btn_inspect = tk.Button(frame, text="Inspect", command=self.inspect_bbox)
+        add_tooltip(
+            self.btn_inspect,
+            "Trace the red-boxed cell through preceding frames. Shortcut: I.",
+        )
         self.btn_inspect.pack(side=tk.RIGHT)
 
         # Label for image name
@@ -174,6 +276,10 @@ class ImageViewer:
 
         # Canvas for image display
         self.canvas = tk.Canvas(self.root, cursor="cross")
+        add_tooltip(
+            self.canvas,
+            "Drag around a cell to create a red box. Green boxes are existing tracks; right-click one to extend it earlier, or use its red X to delete the track.",
+        )
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
         
@@ -206,13 +312,38 @@ class ImageViewer:
         # Bind left and right arrow keys to root window
         self.root.bind("<Left>", self.left_arrow)
         self.root.bind("<Right>", self.right_arrow)
+        self.root.bind("<i>", self.inspect_hotkey)
+        self.root.bind("<I>", self.inspect_hotkey)
+        self.root.bind("<u>", self.update_progress_hotkey)
+        self.root.bind("<U>", self.update_progress_hotkey)
+        self.root.after_idle(self.focus_viewer)
 
-        # Set focus to entry box with a delay
-        self.root.after(100, self.set_focus_to_entry_box)
+        # Keep the image canvas focused so navigation and annotation hotkeys work immediately.
+        self.root.after(100, self.focus_canvas)
 
 
-    def set_focus_to_entry_box(self):
-        self.frame_entry.focus_set()
+    def focus_canvas(self):
+        """Focus the image canvas so keyboard shortcuts do not edit the frame field."""
+        self.canvas.focus_set()
+
+    def focus_viewer(self):
+        """Bring a newly opened Image Viewer forward for immediate hotkey use."""
+        self.root.lift()
+        self.root.focus_force()
+
+    def inspect_hotkey(self, event):
+        """Open the mini-clicker for the currently drawn box when I is pressed."""
+        self.inspect_bbox()
+        return "break"
+
+    def update_progress_hotkey(self, event):
+        """Refresh track annotations when U is pressed."""
+        self.update_progress()
+        return "break"
+
+    def show_help(self):
+        """Display concise instructions for annotating and managing tracks."""
+        messagebox.showinfo("Cell Clicker help", IMAGE_VIEWER_HELP_TEXT, parent=self.root)
 
 
     def focus_in_event(self, event):
@@ -429,6 +560,15 @@ class ImageViewer:
                 'height': original_height
             })
 
+    def complete_clicker_session(self):
+        """Clear the inspected box and refresh track overlays after mini-clicker completion."""
+        if self.rect is not None:
+            self.canvas.delete(self.rect)
+        self.rect = None
+        self.bbox_details = None
+        self.update_progress()
+        self.focus_canvas()
+
     def draw_existing_bboxes(self):
         """Draw bounding boxes and place 'X' buttons only on the last bounding box of each series."""
 
@@ -560,7 +700,10 @@ class ImageViewer:
         img_path = image_path or self.images[self.current_image]
         if series_id is None:
             series_id = get_next_series_id(self.xml_path, img_path)
-        ImageProcessor(self.root, img_path, bbox, self.xml_path, series_id, next_class_id, anchor_path)
+        ImageProcessor(
+            self.root, img_path, bbox, self.xml_path, series_id, next_class_id,
+            anchor_path, on_finished=self.complete_clicker_session,
+        )
 
     def next_image(self):
         if self.current_image < len(self.images) - 1:
@@ -577,5 +720,6 @@ class ImageViewer:
         if 0 <= frame_number < len(self.images):
             self.current_image = frame_number
             self.update_image()
+            self.focus_canvas()
         else:
             messagebox.showerror("Error", "Invalid frame number")

@@ -7,6 +7,7 @@ dependencies:
   - numpy
   - scipy
   - pandas
+  - h5py
   - matplotlib
   - scikit-image
   - pillow
@@ -26,5 +27,7 @@ dependencies:
       - imageio==2.34.0
       - fsspec==2024.2.0
       - openpyxl
+      - pyarrow
       - ultralytics
+      - sahi
       - jupyter

@@ -1,6 +1,8 @@
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import pandas as pd
+
 from CellClicker.manageXML import (
     get_next_series_id,
     prepare_series_extension,
@@ -9,8 +11,10 @@ from CellClicker.manageXML import (
 from CellClicker.project_reconciliation import delete_track_from_project, reconcile_tracking_records, tracking_is_current
 from CellClicker.tracking_xml import read_tracking_xml, write_tracking_xml
 from CellClicker.user_xml import update_xml_multiclass
-from CellClicker.workflow_state import raw_track_revisions, stale_selection_report
+from CellClicker.workflow_state import raw_track_revisions, selection_fingerprint, stale_selection_report
 from CellClicker.duplicate_tracks import find_near_duplicate_tracks
+from CellClicker.convert_selections_multiphase import calculate_median_handling_negatives
+from CellClicker.phase_settings import DEFAULT_PHASES, load_phases, save_phases
 
 
 PHASES = ["prophase", "earlyprometaphase", "prometaphase", "metaphase", "anaphase", "telophase"]
@@ -117,6 +121,29 @@ def test_legacy_tracking_is_current_until_a_raw_track_is_extended(tmp_path):
     assert not tracking_is_current(tracking, raw)
 
 
+def test_tracking_is_stale_when_annotator_phase_selection_changes(tmp_path):
+    project = tmp_path / "project"
+    images = project / "images"
+    selections = project / "user_selections"
+    images.mkdir(parents=True)
+    selections.mkdir()
+    raw = images / "cell_reigons.xml"
+    anchor = str(images / "series_t003.png")
+    _raw_xml(raw, anchor)
+    annotator = selections / "alice.xml"
+    ET.ElementTree(ET.Element("Data")).write(annotator)
+    tracking = selections / "tracking_review.xml"
+    write_tracking_xml(
+        tracking,
+        [{"track_id": "T00001", "source_path": anchor, "series_id": "1", "timepoints": [_point(0)]}],
+        metadata={"selection_fingerprint": selection_fingerprint([annotator])},
+    )
+
+    assert tracking_is_current(tracking, raw)
+    ET.ElementTree(ET.Element("Data", saved="updated")).write(annotator)
+    assert not tracking_is_current(tracking, raw)
+
+
 def test_duplicate_check_requires_two_high_overlap_preferred_frames():
     first = {
         "track_id": "T00001", "series_id": "1", "timepoints": [_point(0), _point(1)],
@@ -134,3 +161,17 @@ def test_duplicate_check_requires_two_high_overlap_preferred_frames():
     assert len(duplicates) == 1
     assert duplicates[0]["first"]["track_id"] == "T00001"
     assert duplicates[0]["second"]["track_id"] == "T00002"
+
+
+def test_phase_skip_requires_a_strict_annotator_majority():
+    assert calculate_median_handling_negatives(pd.Series([-1, 4, 6])) == 5
+    assert calculate_median_handling_negatives(pd.Series([-1, -1, 6])) == -1
+    assert calculate_median_handling_negatives(pd.Series([-1, 4])) == 4
+
+
+def test_project_phase_settings_default_and_custom_mapping(tmp_path):
+    project = tmp_path / "project"
+    assert load_phases(project) == list(DEFAULT_PHASES)
+
+    assert save_phases(project, [{"id": 0, "name": "entry"}, {"id": 1, "name": "exit"}]) == ["entry", "exit"]
+    assert load_phases(project) == ["entry", "exit"]

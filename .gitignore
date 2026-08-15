@@ -19,8 +19,13 @@ sam2_*.pt
 # Generated mitotic-tightener datasets, training runs, and downloaded weights
 Models/tightener_datasets/
 Models/tightener_runs/
+Models/yolo11x_p99p99_bg05/
 runs/
 yolo11n.pt
+
+# Generated output from the max-projection SAHI notebook
+examples/max_projection_sahi/outputs/
+examples/max_projection_sahi/**/*.tif
 
 # Dataset-project outputs created by the annotation suite
 **/aggregated_tracking.xml
