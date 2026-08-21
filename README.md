@@ -79,6 +79,11 @@ targets = get_target_locations(
 )
 ```
 
+Programs that construct a configuration in memory should initialise that
+workflow explicitly with `predict.configure_prediction_runtime(config)`. This
+keeps its model cache and logging run directory separate from other prediction
+workflows in the same Python process.
+
 `coordinate_mode` is one of:
 
 - `stage` (default): converts detections to the current CelFDrive physical-stage convention. `xy_pixel_spacing_um` must be positive.
@@ -134,14 +139,19 @@ The scripts below are retained for legacy workflows:
 CellClicker and CellSelector create YOLO-compatible labels from time-series data:
 
 ```powershell
-python run_clicker.py
-python run_selector.py
-python run_conversion.py
+python -m CellClicker.legacy.run_clicker
+python -m CellClicker.legacy.run_selector
+python -m CellClicker.legacy.run_conversion
 ```
 
-Set the phase names in `run_selector.py` and the dataset/user values in `run_conversion.py` for the experiment. CellSelector opens an interactive GUI, so its selection workflow must be checked manually. The entry point now forwards the configured phase list correctly.
+Set the phase names in `CellClicker/legacy/run_selector.py` and the dataset/user values in `CellClicker/legacy/run_conversion.py` for the experiment. CellSelector opens an interactive GUI, so its selection workflow must be checked manually. The entry point now forwards the configured phase list correctly.
 
 `train.py` is the configuration-driven YOLO training entry point. Pass a schema-versioned YAML file with `--config`, using `examples/yolo_training.example.yaml` as the starting template; `--name` can override only the run name for one invocation. The command-line and GUI entry points share the same validation, dataset preparation, training and held-out-test evaluation workflow.
+
+Benchmark, evaluation, and report scripts are organised as modules in
+`benchmarks`; use `python -m benchmarks.run_benchmark --help` to inspect the
+frozen benchmark commands. Dataset-preparation utilities are likewise in
+`tools` and are invoked with `python -m tools.<module>`.
 
 ## Microscope integration and limitations
 

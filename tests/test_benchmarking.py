@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 import yaml
 
-import benchmarking
+from benchmarks import core as benchmarking
 
 
 CLASS_MAP = {

@@ -11,6 +11,7 @@ from .workflow_state import (
     raw_track_revisions,
     selection_fingerprint,
 )
+from .project_paths import resolve_cell_regions_xml
 
 
 def _remove_selection_entry(tree, track_key):
@@ -47,7 +48,7 @@ def delete_track_from_project(project_dir, anchor_path, series_id):
     if not project_dir:
         project_dir = os.path.dirname(os.path.dirname(os.path.abspath(anchor_path)))
     project_dir = os.path.normpath(project_dir)
-    cell_xml = os.path.join(project_dir, "images", "cell_reigons.xml")
+    cell_xml = str(resolve_cell_regions_xml(project_dir).path)
     selections_dir = os.path.join(project_dir, "user_selections")
     key = (anchor_path, str(series_id))
 

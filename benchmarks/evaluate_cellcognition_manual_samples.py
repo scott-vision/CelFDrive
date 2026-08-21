@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw
 
-from benchmarking import box_iou, create_run_directory, preprocess_image
+from .core import box_iou, create_run_directory, preprocess_image
 
 CLASSES = ["prophase", "earlyprometaphase", "prometaphase", "metaphase", "anaphase", "telophase"]
 MISSED = "background / missed"

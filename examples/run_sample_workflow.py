@@ -73,8 +73,7 @@ def main():
     )
     config["logging"]["enabled"] = False
     config["plotting"]["enabled"] = False
-    predict.config = config
-    predict.model = None
+    predict.configure_prediction_runtime(config)
 
     image = np.loadtxt(args.image, delimiter=",", dtype=np.uint8)
     with open(SAMPLE_DIRECTORY / "expected_detections.json", encoding="utf-8") as expected_file:

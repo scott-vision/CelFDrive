@@ -49,7 +49,7 @@ def draw_stage_table(axis, metrics, title, panel):
     table.scale(1.05, 1.7)
 
 
-def create_figure(fullframe_run, sahi_run, output_path):
+def create_figure(fullframe_run, sahi_run, output_path, title="Effect of SAHI tiled inference on CellClicker-labelled H2B-mCherry time-lapse"):
     """Write the requested four-panel SAHI-effect figure."""
     full_matrix, full_metrics = load_run(fullframe_run)
     sahi_matrix, sahi_metrics = load_run(sahi_run)
@@ -59,7 +59,7 @@ def create_figure(fullframe_run, sahi_run, output_path):
     draw_stage_table(axes[0, 1], full_metrics, "Full-frame stage metrics at confidence 0.50", "B")
     draw_confusion(axes[1, 0], sahi_matrix, "SAHI confusion matrix", "C", maximum_count)
     draw_stage_table(axes[1, 1], sahi_metrics, "SAHI stage metrics at confidence 0.50", "D")
-    figure.suptitle("Effect of SAHI tiled inference on CellClicker-labelled H2B-mCherry time-lapse", fontsize=16)
+    figure.suptitle(title, fontsize=16)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=250, facecolor="white")
@@ -72,5 +72,6 @@ if __name__ == "__main__":
     parser.add_argument("--fullframe-run", required=True)
     parser.add_argument("--sahi-run", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--title", default="Effect of SAHI tiled inference on CellClicker-labelled H2B-mCherry time-lapse")
     arguments = parser.parse_args()
-    create_figure(arguments.fullframe_run, arguments.sahi_run, arguments.output)
+    create_figure(arguments.fullframe_run, arguments.sahi_run, arguments.output, arguments.title)

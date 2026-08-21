@@ -10,15 +10,15 @@ import pytest
 
 def test_selector_entrypoint_passes_configured_phases(monkeypatch):
     received = []
+    repository_root = Path(__file__).resolve().parents[1]
     selector_module = types.ModuleType("CellClicker.image_selector_multiphase")
     selector_module.load_ui_from_folder = lambda phases: received.append(phases)
     package_module = types.ModuleType("CellClicker")
-    package_module.__path__ = []
+    package_module.__path__ = [str(repository_root / "CellClicker")]
     monkeypatch.setitem(sys.modules, "CellClicker", package_module)
     monkeypatch.setitem(sys.modules, "CellClicker.image_selector_multiphase", selector_module)
 
-    repository_root = Path(__file__).resolve().parents[1]
-    runpy.run_path(repository_root / "run_selector.py", run_name="__main__")
+    runpy.run_module("CellClicker.legacy.run_selector", run_name="__main__")
 
     assert received == [[
         "prophase",

@@ -1,13 +1,13 @@
 # Frozen benchmark workflow
 
-`run_benchmark.py` evaluates a frozen checkpoint without editing input images,
+`python -m benchmarks.run_benchmark` evaluates a frozen checkpoint without editing input images,
 labels, paper files, or prior results.  It writes each run to a unique folder
 under `D:\CelFDriveBenchmark\runs` by default.
 
 Run it from the GPU environment:
 
 ```powershell
-conda run -n celfdrive-gpu python run_benchmark.py run --config D:\path\to\paper_test.yaml --name internal_paper_test
+conda run -n celfdrive-gpu python -m benchmarks.run_benchmark run --config D:\path\to\paper_test.yaml --name internal_paper_test
 ```
 
 The label CSV must be a *test-only* file with these columns:
@@ -68,8 +68,8 @@ channels and records this in `run_manifest.json`; it never combines markers.
 The downloaded public sources are deliberately separate from the paper test:
 
 ```powershell
-python run_benchmark.py inventory-ctc --images-root D:\CelFDriveBenchmark\raw\Fluo-N2DL-HeLa --output D:\CelFDriveBenchmark\derived\ctc_inventory.csv
-python run_benchmark.py inventory-cellcognition --images-root D:\CelFDriveBenchmark\raw\H2b_aTub_MD20x_exp911_classifier --output D:\CelFDriveBenchmark\derived\cellcognition_inventory.csv
+python -m benchmarks.run_benchmark inventory-ctc --images-root D:\CelFDriveBenchmark\raw\Fluo-N2DL-HeLa --output D:\CelFDriveBenchmark\derived\ctc_inventory.csv
+python -m benchmarks.run_benchmark inventory-cellcognition --images-root D:\CelFDriveBenchmark\raw\H2b_aTub_MD20x_exp911_classifier --output D:\CelFDriveBenchmark\derived\cellcognition_inventory.csv
 ```
 
 Those inventory commands do not represent the public data as six-stage ground

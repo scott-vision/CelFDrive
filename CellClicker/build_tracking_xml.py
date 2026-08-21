@@ -116,7 +116,7 @@ def build_track_record(track_index, anchor_path, series_id, labels, phases, data
                 label["y_center"],
                 label["width"],
                 label["height"],
-                "cell_reigons.xml",
+                "cell_regions.xml",
             )
         ]
 

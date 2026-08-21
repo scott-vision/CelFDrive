@@ -9,6 +9,7 @@ from .name_selector import run_name_selector
 from .manageXML import append_cell_regions_xml, find_labels_and_extract_rois, get_all_label_names, get_series_count_for_label, get_all_images, cell_xml_to_dataframe
 from .user_xml import store_results, read_xml_to_dataframe
 from .convert_selections import modify_class_ids, append_modified_labels
+from .project_paths import resolve_cell_regions_xml
 import numpy as np
 
 
@@ -123,8 +124,7 @@ def load_ui_from_folder():
     selections_folder = os.path.join(directory, "user_selections")
     os.makedirs(selections_folder, exist_ok=True)
     
-    cell_xml = os.path.join(os.path.join(directory, "images"), "cell_reigons.xml")
-    cell_xml = os.path.normpath(cell_xml)
+    cell_xml = str(resolve_cell_regions_xml(directory).path)
 
     name_xml = run_name_selector(selections_folder)
     print(f"Selected XML: {name_xml}")

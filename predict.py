@@ -11,6 +11,7 @@ from datetime import datetime
 import contextlib
 import math
 import os
+from contextvars import ContextVar
 from dataclasses import dataclass
 from numbers import Real
 
@@ -22,9 +23,20 @@ CONFIG_PATH = Path(__file__).resolve().parent / "celfdrive_predict.yaml"
 CONFIG_REF_PATTERN = re.compile(r"\$\{([^}]+)\}")
 SUPPORTED_BACKENDS = {"ultralytics_yolo"}
 
-config = None
-model = None
-experiment_path = None
+@dataclass
+class PredictionRuntime:
+    """Mutable resources belonging to one prediction workflow invocation.
+
+    Keeping these resources together prevents one microscope workflow from
+    changing another workflow's model, configuration, or logging directory.
+    """
+
+    config: dict | None = None
+    model: object | None = None
+    experiment_path: Path | None = None
+
+
+_runtime: ContextVar[PredictionRuntime | None] = ContextVar("prediction_runtime", default=None)
 
 
 @dataclass(frozen=True)
@@ -99,6 +111,8 @@ def load_predict_config(config_path=CONFIG_PATH):
     with open(config_path, "r", encoding="utf-8") as file:
         raw_config = yaml.safe_load(file)
 
+    if not isinstance(raw_config, dict):
+        raise ValueError("celfdrive_predict.yaml must contain a YAML mapping")
     if raw_config.get("schema_version") != 1:
         raise ValueError("Unsupported celfdrive_predict.yaml schema_version")
 
@@ -126,6 +140,8 @@ def migrate_predict_config(raw_config):
         no_detection.pop(key, None)
     coordinate_conversion = raw_config.setdefault("coordinate_conversion", {})
     coordinate_conversion.setdefault("mode", "stage")
+    coordinate_conversion.setdefault("default_z_offset_um", 0.0)
+    coordinate_conversion.setdefault("merge_tolerance_um", 20.0)
     slidebook = raw_config.setdefault("slidebook", {})
     slidebook.setdefault("objective_offset_um", {"x": 0.0, "y": 0.0, "z": 0.0})
     tiling = raw_config.setdefault("tiling", {})
@@ -141,12 +157,30 @@ def migrate_predict_config(raw_config):
     sahi.setdefault("merge_iou_threshold", 0.1)
 
 
+def configure_prediction_runtime(config, model=None):
+    """Set the prediction resources for the current execution context.
+
+    Call this before using the module with an in-memory configuration, such as
+    a GUI-edited configuration or a test fixture. The model is optional and is
+    otherwise loaded lazily from ``config['model']['weights_path']``.
+    """
+    if not isinstance(config, dict):
+        raise TypeError("config must be a mapping")
+    _runtime.set(PredictionRuntime(config=config, model=model))
+
+
+def get_runtime():
+    """Return this context's runtime, loading the default config on first use."""
+    runtime = _runtime.get()
+    if runtime is None:
+        runtime = PredictionRuntime(config=load_predict_config())
+        _runtime.set(runtime)
+    return runtime
+
+
 def get_config():
-    """Return the process-cached effective prediction configuration mapping."""
-    global config
-    if config is None:
-        config = load_predict_config()
-    return config
+    """Return the effective configuration for the current execution context."""
+    return get_runtime().config
 
 
 def get_model():
@@ -155,9 +189,9 @@ def get_model():
     Raises ``ImportError`` when Ultralytics is unavailable and ``ValueError``
     for unsupported configured backends.
     """
-    global model
-    if model is not None:
-        return model
+    runtime = get_runtime()
+    if runtime.model is not None:
+        return runtime.model
 
     cfg = get_config()
     backend = get_backend(cfg)
@@ -168,9 +202,8 @@ def get_model():
 
     from ultralytics import YOLO
 
-    model = YOLO(weights_path)
-
-    return model
+    runtime.model = YOLO(weights_path)
+    return runtime.model
 
 
 def get_backend(cfg):
@@ -231,62 +264,60 @@ def get_logging_directory():
     return logging_directory
 
 
-def create_exp_folder(base_dir):
-    """Create and cache the next numbered experiment directory beneath ``base_dir``."""
-    global experiment_path
-    logging_cfg = get_config()["logging"]
-    exp_cfg = logging_cfg["experiment_folder"]
-    prefix = exp_cfg.get("prefix", "exp")
-    digits = int(exp_cfg.get("digits", 3))
+def create_experiment_folder(base_dir, experiment_config):
+    """Create and return the next numbered experiment directory beneath ``base_dir``."""
+    prefix = experiment_config.get("prefix", "exp")
+    digits = _positive_integer(experiment_config.get("digits", 3), "logging.experiment_folder.digits")
 
     base_dir = Path(base_dir)
-    items = os.listdir(base_dir)
-    exp_folders = [
-        item for item in items
-        if item.startswith(prefix)
-        and item[len(prefix):].isdigit()
-        and (base_dir / item).is_dir()
+    base_dir.mkdir(parents=True, exist_ok=True)
+    existing_numbers = [
+        int(item.name[len(prefix):])
+        for item in base_dir.iterdir()
+        if item.is_dir() and item.name.startswith(prefix) and item.name[len(prefix):].isdigit()
     ]
-    exp_folders.sort()
+    next_exp_num = max(existing_numbers, default=0) + 1
+    while True:
+        experiment_path = base_dir / f"{prefix}{next_exp_num:0{digits}d}"
+        try:
+            experiment_path.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            next_exp_num += 1
+        else:
+            return experiment_path
 
-    if exp_folders:
-        last_exp_num = int(exp_folders[-1][len(prefix):])
-        next_exp_num = last_exp_num + 1
-    else:
-        next_exp_num = 1
 
-    experiment_path = base_dir / f"{prefix}{next_exp_num:0{digits}d}"
-    experiment_path.mkdir(parents=True, exist_ok=True)
+def next_output_image_path(experiment_path, output_config):
+    """Return the next unused annotated-image path in ``experiment_path``."""
+    experiment_path = Path(experiment_path)
+    prefix = output_config.get("prefix", "tmpimg")
+    digits = _positive_integer(output_config.get("digits", 3), "logging.output_image.digits")
+    extension = output_config.get("extension", ".png")
+    if not isinstance(extension, str) or not extension.startswith(".") or extension == ".":
+        raise ValueError("logging.output_image.extension must be a file extension beginning with '.'")
 
-
-def get_outimg_path():
-    """Return the next unused annotated-image path in the current experiment."""
-    global experiment_path
-    if experiment_path is None:
-        raise RuntimeError("Experiment folder has not been created")
-
-    output_cfg = get_config()["logging"]["output_image"]
-    prefix = output_cfg.get("prefix", "tmpimg")
-    digits = int(output_cfg.get("digits", 3))
-    extension = output_cfg.get("extension", ".png")
-
-    items = os.listdir(experiment_path)
-    tmp_images = [
-        item for item in items
-        if item.startswith(prefix)
-        and item.endswith(extension)
-        and item[len(prefix):-len(extension)].isdigit()
-        and (experiment_path / item).is_file()
+    existing_numbers = [
+        int(item.name[len(prefix):-len(extension)])
+        for item in experiment_path.iterdir()
+        if item.is_file()
+        and item.name.startswith(prefix)
+        and item.name.endswith(extension)
+        and item.name[len(prefix):-len(extension)].isdigit()
     ]
-    tmp_images.sort()
-
-    if tmp_images:
-        last_img_num = int(tmp_images[-1][len(prefix):-len(extension)])
-        next_img_num = last_img_num + 1
-    else:
-        next_img_num = 1
+    next_img_num = max(existing_numbers, default=0) + 1
 
     return experiment_path / f"{prefix}{next_img_num:0{digits}d}{extension}"
+
+
+def get_output_image_path():
+    """Return the next annotated-image path for the active prediction runtime."""
+    runtime = get_runtime()
+    if runtime.experiment_path is None:
+        raise RuntimeError("Experiment folder has not been created")
+    return next_output_image_path(
+        runtime.experiment_path,
+        get_config()["logging"]["output_image"],
+    )
 
 
 def filter_and_sort_detections(detections, class_info):
@@ -737,7 +768,7 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
 
     if plot:
         if save_path is None:
-            save_path = get_outimg_path()
+            save_path = get_output_image_path()
         class_names = {key: value[0] for key, value in class_info.items()}
         plot_image_with_results(processed_img, results, class_names, class_info, save_path)
 
@@ -777,7 +808,7 @@ def process_single_location(
     """
     height, width = image.shape
     plot_enabled = get_config()["plotting"].get("enabled", True) and is_logging_enabled()
-    img_path = get_outimg_path() if plot_enabled else None
+    img_path = get_output_image_path() if plot_enabled else None
     class_names = {key: value[0] for key, value in class_info.items()}
     results = process_image(image, None, img_path, class_info, plot=plot_enabled)
     filtered_detections = filter_and_sort_detections(results, class_info)
@@ -860,8 +891,12 @@ def _run_coordinate_converter(coordinate_converter, **kwargs):
     )
 
 
-def image_cordinates_to_physical(x, y, im_x, im_y, w, h, new_z, xy_pixel_spacing, z_spacing, x_stage_direction, y_stage_direction, z_stage_direction, LLSM, class_id, conf, class_name):
-    """Legacy coordinate-conversion helper retained for existing integrations."""
+def image_coordinates_to_physical(x, y, im_x, im_y, w, h, new_z, xy_pixel_spacing, z_spacing, x_stage_direction, y_stage_direction, z_stage_direction, LLSM, class_id, conf, class_name):
+    """Convert one detected image position to a physical capture target.
+
+    ``z_spacing`` and ``z_stage_direction`` remain accepted because this
+    helper mirrors the historic microscope callback signature.
+    """
     position = CapturePosition(_finite_number(x, "x"), _finite_number(y, "y"), _finite_number(new_z, "new_z"))
     detection = Detection(int(class_id), float(im_x), float(im_y), 0.0, 0.0, float(conf))
     return _convert_detection(
@@ -1049,7 +1084,7 @@ def process_montage(
         return final_result[:, 0], final_result[:, 1], final_result[:, 2], list(final_result[:, 5])
 
     final_result = np.array(sorted_results, dtype=object)
-    tolerance = get_config()["coordinate_conversion"].get("merge_tolerance_um", 20)
+    tolerance = get_config()["coordinate_conversion"]["merge_tolerance_um"]
     new_x, new_y, new_z, class_names = merge_close_coordinates(final_result, tolerance)
     return new_x, new_y, new_z, class_names
 
@@ -1103,8 +1138,6 @@ def get_target_locations(
         If positions, stack shape, coordinate mode, directions, spacing, or a
         converter result violates the public contract.
     """
-    global experiment_path
-
     cfg = get_config()
     positions = _capture_positions(stage_x, stage_y, stage_z)
     _validate_image_stack(image, len(positions))
@@ -1127,7 +1160,10 @@ def get_target_locations(
     if is_logging_enabled():
         logging_directory = get_logging_directory()
         logging_directory.mkdir(parents=True, exist_ok=True)
-        create_exp_folder(logging_directory)
+        get_runtime().experiment_path = create_experiment_folder(
+            logging_directory,
+            cfg["logging"]["experiment_folder"],
+        )
 
     montage_results = process_montage(
         positions,

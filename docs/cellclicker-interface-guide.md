@@ -19,13 +19,23 @@ conda activate celfdrive-gpu
 python run_gui.py
 ```
 
+Most controls provide concise hover tooltips after the pointer rests over them
+briefly. These tooltips explain the immediate action, required input or effect
+of a setting in the project window, CellClicker, CellSelector, tracking review,
+YOLO training and cell-tightener interfaces. Use the fuller workflow sections
+below when choosing experiment-specific parameters or preparing irreversible
+exports and training runs.
+
 The active environment needs the packages in the supplied environment file.
 YOLO11 training, SAM2, and the trained tightener additionally require
 `ultralytics`; SAM2 also needs a compatible PyTorch CPU or CUDA installation.
 
 A project directory must contain `images/`. The raw CellClicker track file is
-`images/cell_reigons.xml`—the spelling is intentional. The interface writes
-all downstream workflow files below `user_selections/`.
+`images/cell_regions.xml`. Existing projects containing only the legacy
+misspelling `cell_reigons.xml` are renamed when loaded. If both files are
+present, the interface warns the user and uses `cell_regions.xml`; it leaves
+both files unchanged. The interface writes all downstream workflow files below
+`user_selections/`.
 
 The GUI creates `user_selections/` when phase annotations are first saved.
 Projects may be moved as complete folders. If a moved project's
@@ -39,7 +49,7 @@ dataset root when the tracking XML is next saved.
 ├── images/
 │   ├── 20231110_P01_t001.png
 │   ├── ...
-│   └── cell_reigons.xml              # raw CellClicker tracks
+│   └── cell_regions.xml              # raw CellClicker tracks
 └── user_selections/
     ├── <reviewer>.xml                # each reviewer's phase choices
     ├── aggregated_tracking.xml       # aggregation result
@@ -172,7 +182,7 @@ contains each track, its chronological timepoints, the selected phase/class,
 image paths, and normalized YOLO boxes. The initial alternative on each
 timepoint is `original`.
 
-Do not train directly from `cell_reigons.xml` or `aggregated_tracking.xml`.
+Do not train directly from `cell_regions.xml` or `aggregated_tracking.xml`.
 Review and export from `tracking_review.xml` instead.
 
 ### If you need to change and rebuild
@@ -372,9 +382,11 @@ selection for a project.
 
 ## Legacy commands
 
-`run_clicker.py`, `run_selector.py`, and `run_conversion.py` remain available
-for existing workflows. New projects should use the unified GUI so track
-identity and review decisions are preserved before export.
+`python -m CellClicker.legacy.run_clicker`,
+`python -m CellClicker.legacy.run_selector`, and
+`python -m CellClicker.legacy.run_conversion` remain available for existing
+workflows. New projects should use the unified GUI so track identity and
+review decisions are preserved before export.
 
 ## Final quality-control checklist
 

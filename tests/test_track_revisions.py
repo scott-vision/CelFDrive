@@ -54,7 +54,7 @@ def _point(source_class_id, box_type="original"):
 
 
 def test_extension_revision_and_stable_series_ids(tmp_path):
-    raw = tmp_path / "cell_reigons.xml"
+    raw = tmp_path / "cell_regions.xml"
     anchor = str(tmp_path / "images" / "series_t003.png")
     _raw_xml(raw, anchor, (1, 3))
 
@@ -72,7 +72,7 @@ def test_stale_selection_and_deletion_reconcile_all_canonical_files(tmp_path):
     images.mkdir(parents=True)
     selections.mkdir()
     anchor = str(images / "series_t003.png")
-    raw = images / "cell_reigons.xml"
+    raw = images / "cell_regions.xml"
     _raw_xml(raw, anchor)
     annotator = selections / "alice.xml"
     _selection(annotator, anchor, 1)
@@ -94,7 +94,7 @@ def test_stale_selection_and_deletion_reconcile_all_canonical_files(tmp_path):
 
 
 def test_reconciliation_preserves_matching_reviewed_frames(tmp_path):
-    raw = tmp_path / "cell_reigons.xml"
+    raw = tmp_path / "cell_regions.xml"
     anchor = str(tmp_path / "images" / "series_t003.png")
     _raw_xml(raw, anchor)
     output = tmp_path / "tracking_review.xml"
@@ -110,7 +110,7 @@ def test_reconciliation_preserves_matching_reviewed_frames(tmp_path):
 
 
 def test_legacy_tracking_is_current_until_a_raw_track_is_extended(tmp_path):
-    raw = tmp_path / "cell_reigons.xml"
+    raw = tmp_path / "cell_regions.xml"
     anchor = str(tmp_path / "images" / "series_t003.png")
     _raw_xml(raw, anchor)
     tracking = tmp_path / "tracking_review.xml"
@@ -127,7 +127,7 @@ def test_tracking_is_stale_when_annotator_phase_selection_changes(tmp_path):
     selections = project / "user_selections"
     images.mkdir(parents=True)
     selections.mkdir()
-    raw = images / "cell_reigons.xml"
+    raw = images / "cell_regions.xml"
     anchor = str(images / "series_t003.png")
     _raw_xml(raw, anchor)
     annotator = selections / "alice.xml"

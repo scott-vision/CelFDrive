@@ -6,7 +6,8 @@ from xml.etree import ElementTree
 import tifffile
 from PIL import Image
 
-from benchmarking import preprocess_image
+from benchmarks.core import preprocess_image
+from CellClicker.project_paths import CELL_REGIONS_FILENAME
 
 
 def create_project(source_position_directory, output_project):
@@ -24,7 +25,7 @@ def create_project(source_position_directory, output_project):
         frame_number = int(frame.name.split("_T")[1].split("_")[0])
         image = preprocess_image(tifffile.imread(frame))
         Image.fromarray(image).save(images_directory / f"P{position}_t{frame_number:03}.png")
-    ElementTree.ElementTree(ElementTree.Element("annotations")).write(images_directory / "cell_reigons.xml", encoding="utf-8", xml_declaration=True)
+    ElementTree.ElementTree(ElementTree.Element("annotations")).write(images_directory / CELL_REGIONS_FILENAME, encoding="utf-8", xml_declaration=True)
     (output_project / "README.txt").write_text(
         f"CellClicker project generated from {len(frames)} original H2B-mCherry TIFF frames for position {position}.\n"
         "Frames are individually 99.99th-percentile clipped and min-max normalised to 8-bit PNG for display.\n"

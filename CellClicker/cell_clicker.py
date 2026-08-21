@@ -14,6 +14,7 @@ from CellClicker.manageXML import (
 )
 from CellClicker.clicker_utils import get_previous_image_name, get_relative_image_name, yolov5_to_xywh
 from CellClicker.tooltips import add_tooltip
+from CellClicker.project_paths import resolve_cell_regions_xml
 
 
 MINI_CLICKER_DISPLAY_SCALE = 3
@@ -369,7 +370,7 @@ class ImageViewer:
         directory = os.path.normpath(directory)
         print('current image folder')
         print(directory)
-        self.xml_path = os.path.join(directory, "cell_reigons.xml")
+        self.xml_path = str(resolve_cell_regions_xml(os.path.dirname(directory)).path)
         self.xml_df = check_xml(self.xml_path)
         print(self.xml_df)
         if not self.xml_df.empty:

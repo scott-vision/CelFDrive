@@ -35,7 +35,7 @@ def make_track(project_dir: Path, image_path: Path):
                         "y_center": 0.5,
                         "width": 0.5,
                         "height": 0.5,
-                        "source": "cell_reigons.xml",
+                        "source": "cell_regions.xml",
                     },
                     {
                         "box_type": "otsu",

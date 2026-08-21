@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from benchmarking import _sha256, create_run_directory, detection_metrics, prepare_model_input, preprocess_image
-from evaluate_cellclicker_exported_sahi import (
+from .core import _sha256, create_run_directory, detection_metrics, prepare_model_input, preprocess_image
+from .evaluate_cellclicker_exported_sahi import (
     CLASSES,
     full_confusion,
     load_exported_labels,
@@ -15,7 +15,7 @@ from evaluate_cellclicker_exported_sahi import (
     write_matrix_png,
     write_precision_recall_png,
 )
-from run_cellcognition_target_benchmark import MODEL_PATH
+from .run_cellcognition_target_benchmark import MODEL_PATH
 
 
 def full_frame_predictions(labels, model, confidence, batch_size, device):
@@ -36,14 +36,14 @@ def full_frame_predictions(labels, model, confidence, batch_size, device):
     return pd.DataFrame(rows, columns=("image_id", "group_id", "x_min", "y_min", "x_max", "y_max", "centre_x", "centre_y", "confidence", "class_name"))
 
 
-def run(project_directory, raw_images_directory, output_root=r"D:\CelFDriveBenchmark\runs", confidence=.5, batch_size=8, device="cuda:0"):
+def run(project_directory, raw_images_directory, output_root=r"D:\CelFDriveBenchmark\runs", confidence=.5, batch_size=8, device="cuda:0", model_path=MODEL_PATH):
     """Run full-frame batched GPU inference and save comparable benchmark artifacts."""
     import torch
     from ultralytics import YOLO
 
     labels = load_exported_labels(project_directory, raw_images_directory)
     run_directory = create_run_directory(output_root, "cellclicker_exported_labels_fullframe")
-    model_path = MODEL_PATH.resolve()
+    model_path = Path(model_path).resolve()
     try:
         predictions = full_frame_predictions(labels, YOLO(str(model_path)), confidence, batch_size, device)
         matches = match_any_class(predictions, labels)
@@ -77,5 +77,6 @@ if __name__ == "__main__":
     parser.add_argument("--confidence", type=float, default=.5)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--model-path", default=str(MODEL_PATH))
     arguments = parser.parse_args()
-    print(run(arguments.project_directory, arguments.raw_images_directory, arguments.output_root, arguments.confidence, arguments.batch_size, arguments.device))
+    print(run(arguments.project_directory, arguments.raw_images_directory, arguments.output_root, arguments.confidence, arguments.batch_size, arguments.device, arguments.model_path))

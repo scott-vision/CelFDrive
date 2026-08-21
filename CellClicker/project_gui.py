@@ -34,6 +34,7 @@ from .duplicate_tracks import find_near_duplicate_tracks
 from .project_reconciliation import delete_track_from_project
 from .phase_settings import DEFAULT_PHASES, load_phases, phase_signature, save_phases, settings_path
 from .tooltips import add_tooltip
+from .project_paths import CELL_REGIONS_FILENAME, resolve_cell_regions_xml
 
 
 LOGGER = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ class ProjectGUI:
 
         self.project_var = tk.StringVar(value="No project loaded")
         self.images_status_var = tk.StringVar(value="images/: not checked")
-        self.cell_xml_status_var = tk.StringVar(value="cell_reigons.xml: not checked")
+        self.cell_xml_status_var = tk.StringVar(value=f"{CELL_REGIONS_FILENAME}: not checked")
         self.user_selections_status_var = tk.StringVar(value="user_selections/: not checked")
         self.aggregated_status_var = tk.StringVar(value="aggregated_tracking.xml: not checked")
         self.tracking_status_var = tk.StringVar(value="tracking_review.xml: not checked")
@@ -202,7 +203,7 @@ class ProjectGUI:
         notes = (
             "Workflow:\n"
             "1. Load a dataset folder.\n"
-            "2. Run CellClicker to create tracks in images/cell_reigons.xml.\n"
+            "2. Run CellClicker to create tracks in images/cell_regions.xml.\n"
             "3. Run the phase selector to create user XMLs in user_selections/.\n"
             "4. Aggregate selections and build tracking_review.xml with original boxes.\n"
             "5. Optionally apply Otsu or SAM2 to generate alternative boxes in tracking_review.xml.\n"
@@ -221,6 +222,20 @@ class ProjectGUI:
             return
         self.project_dir = os.path.normpath(project_dir)
         self.project_var.set(f"Project: {self.project_dir}")
+        resolution = resolve_cell_regions_xml(self.project_dir)
+        if resolution.migrated_legacy_file:
+            messagebox.showinfo(
+                "Annotation File Renamed",
+                "Renamed legacy images/cell_reigons.xml to images/cell_regions.xml.",
+                parent=self.root,
+            )
+        if resolution.both_files_present:
+            messagebox.showwarning(
+                "Duplicate Annotation Files",
+                "Both images/cell_regions.xml and legacy images/cell_reigons.xml were found. "
+                "CelFDrive will use cell_regions.xml; the legacy file was left unchanged for manual review.",
+                parent=self.root,
+            )
         self._refresh_project_status()
         self.status_var.set("Project loaded.")
 
@@ -304,7 +319,7 @@ class ProjectGUI:
     def _refresh_project_status(self):
         if not self.project_dir:
             self.images_status_var.set("images/: not checked")
-            self.cell_xml_status_var.set("cell_reigons.xml: not checked")
+            self.cell_xml_status_var.set(f"{CELL_REGIONS_FILENAME}: not checked")
             self.user_selections_status_var.set("user_selections/: not checked")
             self.aggregated_status_var.set("aggregated_tracking.xml: not checked")
             self.tracking_status_var.set("tracking_review.xml: not checked")
@@ -312,12 +327,12 @@ class ProjectGUI:
 
         images_dir = os.path.join(self.project_dir, "images")
         selections_dir = os.path.join(self.project_dir, "user_selections")
-        cell_xml = os.path.join(images_dir, "cell_reigons.xml")
+        cell_xml = resolve_cell_regions_xml(self.project_dir).path
         aggregated_xml = os.path.join(selections_dir, "aggregated_tracking.xml")
         tracking_xml = os.path.join(selections_dir, "tracking_review.xml")
 
         self.images_status_var.set(f"images/: {'found' if os.path.isdir(images_dir) else 'missing'}")
-        self.cell_xml_status_var.set(f"cell_reigons.xml: {'found' if os.path.exists(cell_xml) else 'missing'}")
+        self.cell_xml_status_var.set(f"{CELL_REGIONS_FILENAME}: {'found' if cell_xml.is_file() else 'missing'}")
         self.user_selections_status_var.set(f"user_selections/: {'found' if os.path.isdir(selections_dir) else 'missing'}")
         self.aggregated_status_var.set(f"aggregated_tracking.xml: {'found' if os.path.exists(aggregated_xml) else 'missing'}")
         self.tracking_status_var.set(f"tracking_review.xml: {'found' if os.path.exists(tracking_xml) else 'missing'}")
@@ -419,7 +434,7 @@ class ProjectGUI:
         try:
             aggregate_xml(
                 xml_files, output_xml,
-                cell_regions_xml=os.path.join(self.project_dir, "images", "cell_reigons.xml"),
+                cell_regions_xml=str(resolve_cell_regions_xml(self.project_dir).path),
                 phases=load_phases(self.project_dir),
                 phase_signature=(
                     phase_signature(load_phases(self.project_dir))
@@ -454,7 +469,7 @@ class ProjectGUI:
 
     def _require_current_tracking(self):
         tracking_xml = os.path.join(self.project_dir, "user_selections", "tracking_review.xml")
-        cell_xml = os.path.join(self.project_dir, "images", "cell_reigons.xml")
+        cell_xml = str(resolve_cell_regions_xml(self.project_dir).path)
         if not os.path.isfile(tracking_xml):
             messagebox.showerror("Tracking XML Missing", "Build tracking_review.xml first.", parent=self.root)
             return None

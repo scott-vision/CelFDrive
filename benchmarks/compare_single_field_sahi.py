@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from benchmarking import _sha256, create_run_directory, prepare_model_input, preprocess_image
-from run_cellcognition_full_label_sahi_benchmark import batched_sahi_prediction_table
-from run_cellcognition_target_benchmark import MODEL_PATH, PREDICTION_MAP
+from .core import _sha256, create_run_directory, prepare_model_input, preprocess_image
+from .run_cellcognition_full_label_sahi_benchmark import batched_sahi_prediction_table
+from .run_cellcognition_target_benchmark import MODEL_PATH, PREDICTION_MAP
 
 
 def _draw(axis, image, predictions, title):
