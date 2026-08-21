@@ -27,6 +27,13 @@ A project directory must contain `images/`. The raw CellClicker track file is
 `images/cell_reigons.xml`—the spelling is intentional. The interface writes
 all downstream workflow files below `user_selections/`.
 
+The GUI creates `user_selections/` when phase annotations are first saved.
+Projects may be moved as complete folders. If a moved project's
+`tracking_review.xml` still records paths below its former
+`dataset_root/images/` directory, CelFDrive resolves those paths below the
+current project's `images/` directory. It persists the repaired paths and
+dataset root when the tracking XML is next saved.
+
 ```text
 20231110/
 ├── images/
@@ -80,9 +87,16 @@ To create a track:
 Green boxes are existing tracks. Right-click a green box and choose
 **Extend earlier** when the same cell has a missing earlier timepoint. This
 creates a new revision of only that raw series; it does not alter other tracks.
+Only that series returns to each annotator's phase-selection queue, and
+aggregation requires every annotator XML to select its current revision.
+Rebuilding tracking review retains reviewed boxes on existing raw frames, gives
+new frames their original boxes, and marks the series pending review.
+
 Use the red **X** on a track's final box only to delete the whole raw track.
-Deletion also removes that series from phase selections, aggregate, and review;
-existing exports are then stale and must be exported again.
+After confirmation, the project removes that series from phase selections,
+aggregate, and review without changing other series IDs or reviews. Existing
+exports become stale and must be recreated; complete exports remove files that
+belong only to the deleted series.
 
 ## 2. Set the phase vocabulary
 
@@ -243,7 +257,9 @@ Then use the appropriate button:
 
 An export is a complete snapshot: files that belong only to deleted tracks are
 removed. The exporter requires every source image referenced by the review XML
-to be below the selected project's `images/` directory.
+to be below the selected project's `images/` directory. It reports an
+actionable error when the tracking XML metadata does not match the selected
+project.
 
 After a YOLO export, choose **View Exported Dataset**. This is a read-only
 quality-control viewer, not an editor. It overlays final class-labelled boxes;
@@ -256,6 +272,8 @@ save, and export again.
 ## 7. Train a phase model (YOLO11)
 
 Only train from reviewed projects with a current **Export YOLO Labels** result.
+Each selected project needs `tracking_review.xml` and exported YOLO labels;
+models and microscopy datasets are not bundled with this repository.
 Open **Open YOLO Training** and add separate project folders to **Training
 Projects**, **Validation Projects**, and **Test Projects**. A project must be
 in exactly one split. Do not put the Warwick example project in all three
@@ -334,6 +352,10 @@ capped at 320 pixels. **Prepare And Train YOLO11n** writes a
 `training_manifest.csv`, reports validation output each epoch, and evaluates
 the best checkpoint on the held-out test set.
 
+`training_manifest.csv` records every included or skipped timepoint, its source
+project and image, selected preferred box, review-crop bounds, output crop and
+label paths, and any skip reason.
+
 To use the result in a project, return to the main GUI:
 
 1. Click **Configure Cell Tightener** and choose the trained `best.pt`.
@@ -341,6 +363,18 @@ To use the result in a project, return to the main GUI:
 3. Open Tracking Review, inspect them, select the best box or manually tighten
    it, then **Save & Mark Reviewed**.
 4. Export a fresh YOLO or COCO snapshot before any new phase-model training.
+
+When several tightener boxes are detected, the default selection is the
+highest-confidence box containing the original prompt-box centre. If none
+contains the centre, CelFDrive uses the greatest overlap with the prompt box.
+**Configure Cell Tightener** can instead persist pure overlap or confidence
+selection for a project.
+
+## Legacy commands
+
+`run_clicker.py`, `run_selector.py`, and `run_conversion.py` remain available
+for existing workflows. New projects should use the unified GUI so track
+identity and review decisions are preserved before export.
 
 ## Final quality-control checklist
 
