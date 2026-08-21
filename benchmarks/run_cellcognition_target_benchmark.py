@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from benchmarking import _sha256, create_run_directory, prepare_model_input, preprocess_image, write_quality_overlays
+from .core import _sha256, create_run_directory, prepare_model_input, preprocess_image, write_quality_overlays
 
 MODEL_PATH = Path("Models/yolo11x_p99p99_bg05/weights/best.pt")
 SOURCE_MAP = {"pro": "prophase", "prometa": "prometaphase", "meta": "metaphase", "earlyana": "anaphase", "lateana": "anaphase", "telo": "telophase"}

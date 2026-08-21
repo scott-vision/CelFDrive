@@ -6,11 +6,9 @@ import predict
 
 @pytest.fixture(autouse=True)
 def reset_predict_state():
-    original_config = predict.config
-    original_model = predict.model
+    original_runtime = predict._runtime.get()
     yield
-    predict.config = original_config
-    predict.model = original_model
+    predict._runtime.set(original_runtime)
 
 
 def config_for_tests(**overrides):
@@ -38,6 +36,7 @@ def config_for_tests(**overrides):
         },
         "coordinate_conversion": {
             "default_z_offset_um": 0.0,
+            "merge_tolerance_um": 20.0,
             "llsm": {"invert_y_stage_direction": True},
         },
         "logging": {"enabled": False},
@@ -96,12 +95,36 @@ no_detection:
 
 
 def test_get_logging_directory_resolves_relative_log_directory_from_project_root(tmp_path):
-    predict.config = {
+    predict.configure_prediction_runtime({
         "project": {"repo_path": str(tmp_path)},
         "logging": {"root_dir": "Logging", "use_date_subfolder": False},
-    }
+    })
 
     assert predict.get_logging_directory() == tmp_path / "Logging"
+
+
+def test_experiment_folder_allocator_uses_highest_numeric_suffix(tmp_path):
+    (tmp_path / "exp009").mkdir()
+    (tmp_path / "exp1000").mkdir()
+
+    folder = predict.create_experiment_folder(
+        tmp_path,
+        {"prefix": "exp", "digits": 3},
+    )
+
+    assert folder == tmp_path / "exp1001"
+
+
+def test_output_image_allocator_uses_highest_numeric_suffix(tmp_path):
+    (tmp_path / "tmpimg009.png").touch()
+    (tmp_path / "tmpimg1000.png").touch()
+
+    path = predict.next_output_image_path(
+        tmp_path,
+        {"prefix": "tmpimg", "digits": 3, "extension": ".png"},
+    )
+
+    assert path == tmp_path / "tmpimg1001.png"
 
 
 @pytest.mark.parametrize(
@@ -117,7 +140,7 @@ def test_get_logging_directory_resolves_relative_log_directory_from_project_root
     ],
 )
 def test_split_image_returns_complete_tiles_at_all_boundaries(shape, expected_offsets, expected_tile_shapes):
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
 
     tiles = predict.split_image(np.zeros(shape, dtype=np.uint8))
 
@@ -133,7 +156,7 @@ def test_split_image_honours_overlap_and_covers_the_final_edge():
         "overlap_px": 50,
         "deduplication_tolerance_px": 1.0,
     }
-    predict.config = config
+    predict.configure_prediction_runtime(config)
 
     tiles = predict.split_image(np.zeros((320, 430), dtype=np.uint8))
 
@@ -146,7 +169,7 @@ def test_split_image_honours_overlap_and_covers_the_final_edge():
 def test_split_image_rejects_overlap_as_large_as_the_tile():
     config = config_for_tests()
     config["tiling"]["overlap_px"] = 640
-    predict.config = config
+    predict.configure_prediction_runtime(config)
 
     with pytest.raises(ValueError, match="overlap_px"):
         predict.split_image(np.zeros((640, 640), dtype=np.uint8))
@@ -168,7 +191,7 @@ def test_deduplicate_detections_keeps_highest_confidence_same_class_detection():
 
 
 def test_preprocess_image_rejects_unsupported_input_shape():
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
 
     with pytest.raises(ValueError, match="Unsupported image shape"):
         predict.preprocess_image(np.zeros((2, 3, 4, 5), dtype=np.uint8))
@@ -177,7 +200,7 @@ def test_preprocess_image_rejects_unsupported_input_shape():
 def test_preprocess_image_rejects_invalid_percentile():
     config = config_for_tests()
     config["preprocessing"]["top_clip_percentile"] = 100
-    predict.config = config
+    predict.configure_prediction_runtime(config)
 
     with pytest.raises(ValueError, match="top_clip_percentile"):
         predict.preprocess_image(np.zeros((3, 3), dtype=np.uint8))
@@ -186,7 +209,7 @@ def test_preprocess_image_rejects_invalid_percentile():
 def test_process_image_routes_sahi_without_standard_splitting(monkeypatch):
     config = config_for_tests()
     config["inference"]["mode"] = "sahi"
-    predict.config = config
+    predict.configure_prediction_runtime(config)
     observed = {}
 
     def fake_sahi(image, settings):
@@ -209,7 +232,7 @@ def test_process_image_routes_sahi_without_standard_splitting(monkeypatch):
 
 
 def test_run_sahi_inference_translates_merges_and_batches(monkeypatch):
-    import sahi.slicing
+    sahi_slicing = pytest.importorskip("sahi.slicing")
 
     class FakeTensor:
         def __init__(self, values):
@@ -257,7 +280,7 @@ def test_run_sahi_inference_translates_merges_and_batches(monkeypatch):
         {"image": np.full((40, 40, 3), 2, dtype=np.uint8), "starting_pixel": [10, 0]},
         {"image": np.full((40, 40, 3), 3, dtype=np.uint8), "starting_pixel": [100, 50]},
     ]
-    monkeypatch.setattr(sahi.slicing, "slice_image", lambda *_args, **_kwargs: slices)
+    monkeypatch.setattr(sahi_slicing, "slice_image", lambda *_args, **_kwargs: slices)
     fake_model = FakeModel()
     monkeypatch.setattr(predict, "get_model", lambda: fake_model)
     settings = {
@@ -307,7 +330,7 @@ def test_global_filter_excludes_classes_disabled_by_priority():
 
 
 def test_process_montage_returns_empty_result_when_global_filter_removes_every_detection(monkeypatch):
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
     monkeypatch.setattr(
         predict,
         "process_single_location",
@@ -331,9 +354,9 @@ def test_process_montage_returns_empty_result_when_global_filter_removes_every_d
 
 
 def test_coordinate_conversion_applies_spacing_and_llsm_y_inversion():
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
 
-    converted = predict.image_cordinates_to_physical(
+    converted = predict.image_coordinates_to_physical(
         x=10,
         y=20,
         im_x=70,
@@ -356,7 +379,7 @@ def test_coordinate_conversion_applies_spacing_and_llsm_y_inversion():
 
 
 def test_get_target_location_ends_workflow_when_no_detection(monkeypatch):
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
     monkeypatch.setattr(
         predict,
         "process_montage",
@@ -386,7 +409,7 @@ def mock_process_image(monkeypatch, detections):
 
 
 def test_named_stage_api_matches_legacy_wrapper(monkeypatch):
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
     mock_process_image(monkeypatch, [[0, 70, 40, 20, 10, 0.9]])
     image = np.zeros((100, 200, 1), dtype=np.uint8)
 
@@ -409,7 +432,7 @@ def test_named_stage_api_matches_legacy_wrapper(monkeypatch):
 
 
 def test_pixel_mode_returns_detection_centre(monkeypatch):
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
     mock_process_image(monkeypatch, [[0, 70, 40, 20, 10, 0.9]])
 
     output = predict.get_target_locations(
@@ -427,7 +450,7 @@ def test_pixel_mode_returns_detection_centre(monkeypatch):
 
 
 def test_legacy_llsm_wrapper_preserves_y_direction_inversion(monkeypatch):
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
     mock_process_image(monkeypatch, [[0, 70, 40, 20, 10, 0.9]])
     image = np.zeros((100, 200, 1), dtype=np.uint8)
 
@@ -439,7 +462,7 @@ def test_legacy_llsm_wrapper_preserves_y_direction_inversion(monkeypatch):
 
 
 def test_callable_mode_receives_documented_arguments(monkeypatch):
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
     mock_process_image(monkeypatch, [[0, 70, 40, 20, 10, 0.9]])
     received = {}
 
@@ -476,7 +499,7 @@ def test_callable_mode_receives_documented_arguments(monkeypatch):
     ],
 )
 def test_coordinate_mode_validation(coordinate_mode, coordinate_converter, message):
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
 
     with pytest.raises((TypeError, ValueError), match=message):
         predict.get_target_locations(
@@ -491,7 +514,7 @@ def test_coordinate_mode_validation(coordinate_mode, coordinate_converter, messa
 
 
 def test_callable_mode_rejects_invalid_return(monkeypatch):
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
     mock_process_image(monkeypatch, [[0, 1, 1, 1, 1, 0.9]])
 
     with pytest.raises(ValueError, match="exactly three"):
@@ -518,7 +541,7 @@ def test_callable_mode_rejects_invalid_return(monkeypatch):
 
 
 def test_named_api_validates_montage_shape_spacing_and_directions():
-    predict.config = config_for_tests()
+    predict.configure_prediction_runtime(config_for_tests())
 
     with pytest.raises(ValueError, match="position axis"):
         predict.get_target_locations(

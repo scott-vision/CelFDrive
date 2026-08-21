@@ -21,6 +21,7 @@ from .convert_selections_multiphase import parse_xml_for_phases, parse_xml_for_p
 from .workflow_state import entry_is_current, raw_track_revisions, selection_entries_by_track
 from .phase_settings import DEFAULT_PHASES, load_phases, phase_signature, settings_path
 from .tooltips import add_tooltip
+from .project_paths import resolve_cell_regions_xml
 
 
 PHASE_SELECTOR_HELP_TEXT = (
@@ -79,7 +80,7 @@ def _load_images_with_progress(cell_xml, root):
 
     loading_label = tk.Label(
         loading_window,
-        text="Loading tracked image sets from cell_reigons.xml...",
+        text="Loading tracked image sets from cell_regions.xml...",
         anchor=tk.W,
         justify=tk.LEFT,
     )
@@ -639,15 +640,14 @@ def load_ui_from_folder(phases=None, verbose=False):
 def load_ui_for_project(directory, phases=None, parent=None):
     """Launch phase selection for a standard project directory.
 
-    Reads ``images/cell_reigons.xml`` and writes the chosen user XML beneath
+    Reads ``images/cell_regions.xml`` and writes the chosen user XML beneath
     ``user_selections``. ``parent`` allows the selector to be a child window.
     """
     phases = phases or load_phases(directory)
     selections_folder = os.path.join(directory, "user_selections")
     os.makedirs(selections_folder, exist_ok=True)
     
-    cell_xml = os.path.join(os.path.join(directory, "images"), "cell_reigons.xml")
-    cell_xml = os.path.normpath(cell_xml)
+    cell_xml = str(resolve_cell_regions_xml(directory).path)
 
     if parent is None:
         progress_root = tk.Tk()

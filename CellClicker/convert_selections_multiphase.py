@@ -277,7 +277,7 @@ def write_yolo_label(filename, user, new_class_id, adjusted_label):
 
 
 
-def convert_selections_multiphase(user_xml, cell_reigons_xml, new_label_folder, user, imgpath):
+def convert_selections_multiphase(user_xml, cell_regions_xml, new_label_folder, user, imgpath):
     """Convert one user's phase XML and region XML into YOLO label files.
 
     The output contains normalized class-ID centre boxes and is written beneath
@@ -286,7 +286,7 @@ def convert_selections_multiphase(user_xml, cell_reigons_xml, new_label_folder, 
 
     phase_data = parse_xml_for_phases(user_xml)
     # print(phase_data)
-    labels_data = parse_xml_for_labels(cell_reigons_xml)
+    labels_data = parse_xml_for_labels(cell_regions_xml)
     # print(labels_data)
     create_yolo_labels(phase_data, labels_data, new_label_folder, user, imgpath)
 

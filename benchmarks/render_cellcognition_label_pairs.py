@@ -8,7 +8,7 @@ import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 import tifffile
 
-from benchmarking import preprocess_image
+from .core import preprocess_image
 
 
 def _safe_name(value):

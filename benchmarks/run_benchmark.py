@@ -2,7 +2,7 @@
 import argparse
 from pathlib import Path
 
-from benchmarking import inventory_cellcognition_dataset, inventory_ctc_dataset, run_internal_benchmark
+from .core import inventory_cellcognition_dataset, inventory_ctc_dataset, run_internal_benchmark
 
 
 def main():

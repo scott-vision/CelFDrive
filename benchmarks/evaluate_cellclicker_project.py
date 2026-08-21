@@ -6,16 +6,18 @@ from pathlib import Path
 
 import pandas as pd
 
-from benchmarking import _sha256, box_iou, create_run_directory, prepare_model_input, preprocess_image
-from run_cellcognition_target_benchmark import MODEL_PATH
+from .core import _sha256, box_iou, create_run_directory, prepare_model_input, preprocess_image
+from .run_cellcognition_target_benchmark import MODEL_PATH
 
 
 def load_cellclicker_labels(project_directory, raw_images_directory):
     """Convert CellClicker's backward time-series XML labels to pixel boxes."""
     from CellClicker.manageXML import cell_xml_to_dataframe_absfilenames
 
+    from CellClicker.project_paths import resolve_cell_regions_xml
+
     project_directory, raw_images_directory = Path(project_directory), Path(raw_images_directory)
-    xml_path = project_directory / "images" / "cell_reigons.xml"
+    xml_path = resolve_cell_regions_xml(project_directory).path
     labels = cell_xml_to_dataframe_absfilenames(str(xml_path))
     if labels.empty:
         raise ValueError(f"No CellClicker labels found in {xml_path}")

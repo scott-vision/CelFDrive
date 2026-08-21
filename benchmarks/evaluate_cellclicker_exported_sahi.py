@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from benchmarking import _sha256, box_iou, create_run_directory, detection_metrics
-from run_cellcognition_full_label_sahi_benchmark import batched_sahi_prediction_table
-from run_cellcognition_target_benchmark import MODEL_PATH
+from .core import _sha256, box_iou, create_run_directory, detection_metrics
+from .run_cellcognition_full_label_sahi_benchmark import batched_sahi_prediction_table
+from .run_cellcognition_target_benchmark import MODEL_PATH
 
 CLASSES = ["prophase", "earlyprometaphase", "prometaphase", "metaphase", "anaphase", "telophase"]
 BACKGROUND = "background / missed"
@@ -134,7 +134,7 @@ def write_precision_recall_png(table, path):
     plt.close(figure)
 
 
-def run(project_directory, raw_images_directory, output_root=r"D:\CelFDriveBenchmark\runs", confidence=.5, merge_iou=.1, device="cuda:0"):
+def run(project_directory, raw_images_directory, output_root=r"D:\CelFDriveBenchmark\runs", confidence=.5, merge_iou=.1, device="cuda:0", model_path=MODEL_PATH):
     """Run full exported-label evaluation with GPU-batched SAHI inference."""
     import sahi
     import torch
@@ -142,7 +142,7 @@ def run(project_directory, raw_images_directory, output_root=r"D:\CelFDriveBench
 
     labels = load_exported_labels(project_directory, raw_images_directory)
     run_directory = create_run_directory(output_root, "cellclicker_exported_labels_sahi")
-    model_path = MODEL_PATH.resolve()
+    model_path = Path(model_path).resolve()
     try:
         model = AutoDetectionModel.from_pretrained(model_type="ultralytics", model_path=str(model_path), confidence_threshold=confidence, device=device, image_size=640)
         predictions = batched_sahi_prediction_table(labels, model, 640, 640, .25, 6, postprocess_metric="IOU", postprocess_threshold=merge_iou)
@@ -177,5 +177,6 @@ if __name__ == "__main__":
     parser.add_argument("--confidence", type=float, default=.5)
     parser.add_argument("--merge-iou", type=float, default=.1)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--model-path", default=str(MODEL_PATH))
     args = parser.parse_args()
-    print(run(args.project_directory, args.raw_images_directory, args.output_root, args.confidence, args.merge_iou, args.device))
+    print(run(args.project_directory, args.raw_images_directory, args.output_root, args.confidence, args.merge_iou, args.device, args.model_path))

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from benchmarking import write_quality_overlays
+from .core import write_quality_overlays
 
 
 def main():

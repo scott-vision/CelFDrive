@@ -1,4 +1,4 @@
-"""Read and update CellClicker's ``cell_reigons.xml`` annotation database."""
+"""Read and update CellClicker's ``cell_regions.xml`` annotation database."""
 
 import xml.etree.ElementTree as ET
 import cv2
@@ -83,7 +83,7 @@ def find_labels_and_extract_rois(xml_path, label_name, image_path):
     return labels
 
 def append_cell_regions_xml(xml_path, label_path, class_id, x_center, y_center, width, height, img_width, img_height, series):
-    """Append one pixel-space annotation to ``cell_reigons.xml``.
+    """Append one pixel-space annotation to ``cell_regions.xml``.
 
     The pixel centre box is normalized by ``img_width`` and ``img_height``
     before persistence; ``series`` identifies the time-series annotation.
@@ -236,7 +236,9 @@ def get_all_images(xml_path, progress_callback=None):
     total_items = len(label_names)
     for index, (label_path, image_path) in enumerate(zip(label_names, image_names), start=1):
 #         print(label_path, image_path)
-        image_path = xml_path.split("cell_reigons.xml")[0]+image_path.split("/images/")[1]
+        image_path_parts = image_path.replace("\\", "/").split("/images/", 1)
+        if len(image_path_parts) == 2:
+            image_path = os.path.join(os.path.dirname(os.path.abspath(xml_path)), image_path_parts[1])
         print("finding: " +image_path)
         image_dict = find_labels_and_extract_rois(xml_path, label_path, image_path)
 #         print(image)

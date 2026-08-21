@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from benchmarking import _sha256, box_iou, create_run_directory, prepare_model_input, preprocess_image, write_quality_overlays
-from run_cellcognition_target_benchmark import MODEL_PATH, PREDICTION_MAP, SOURCE_MAP
+from .core import _sha256, box_iou, create_run_directory, prepare_model_input, preprocess_image, write_quality_overlays
+from .run_cellcognition_target_benchmark import MODEL_PATH, PREDICTION_MAP, SOURCE_MAP
 
 
 def batched_sahi_prediction_table(labels, detection_model, slice_height, slice_width, overlap_ratio, tile_batch_size, postprocess_metric="IOS", postprocess_threshold=.5):

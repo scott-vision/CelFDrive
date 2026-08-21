@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from benchmarking import (
+from .core import (
     _sha256,
     box_iou,
     create_run_directory,

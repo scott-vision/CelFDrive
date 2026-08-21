@@ -5,6 +5,7 @@ from tkinter import filedialog
 
 from .build_tracking_xml import build_tracking_xml
 from .tracking_review_ui import launch_tracking_review_ui
+from .project_paths import resolve_cell_regions_xml
 
 def build_tracking_xml_from_dataset(
     dataset_dir,
@@ -16,14 +17,13 @@ def build_tracking_xml_from_dataset(
 ):
     """Build tracking XML from the standard CellClicker project layout.
 
-    ``dataset_dir`` must contain ``images/cell_reigons.xml`` and phase
+    ``dataset_dir`` must contain ``images/cell_regions.xml`` and phase
     selections under ``user_selections``. Returns the output XML path and can
     optionally open the review interface.
     """
     dataset_dir = os.path.normpath(dataset_dir)
     selections_dir = os.path.join(dataset_dir, "user_selections")
-    images_dir = os.path.join(dataset_dir, "images")
-    cell_regions_xml = os.path.join(images_dir, "cell_reigons.xml")
+    cell_regions_xml = str(resolve_cell_regions_xml(dataset_dir).path)
 
     if phase_xml is None:
         phase_xml = os.path.join(selections_dir, "aggregated_tracking.xml")
