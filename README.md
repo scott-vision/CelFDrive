@@ -125,7 +125,7 @@ The current stage conversion is specific to the existing 3i conventions. The leg
 For new annotation projects, use the unified GUI:
 
 ```powershell
-python run_gui.py
+python run_clicker_gui.py
 ```
 
 It centralises project availability checks and guides the complete workflow:

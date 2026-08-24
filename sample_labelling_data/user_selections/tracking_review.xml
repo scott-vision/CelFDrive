@@ -1,0 +1,52 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TrackingData>
+  <Metadata>
+    <phase_xml>C:\Users\Brook\Documents\Work\CelFDrive\sample_labelling_data\user_selections\aggregated_tracking.xml</phase_xml>
+    <cell_regions_xml>C:\Users\Brook\Documents\Work\CelFDrive\sample_labelling_data\images\cell_regions.xml</cell_regions_xml>
+    <selection_fingerprint>2084c7670c742dd63c419be332a48493757a6758fdec63a87d01a60ea920f615</selection_fingerprint>
+    <dataset_root>C:\Users\Brook\Documents\Work\CelFDrive\sample_labelling_data</dataset_root>
+    <raw_revision_fingerprint>80224a2699a2bce15fa3515cfed805b6efe7e7299e374d71901ed16bcea5afca</raw_revision_fingerprint>
+    <exports_stale>false</exports_stale>
+  </Metadata><Classes>
+    <Class id="0" name="prophase" />
+    <Class id="1" name="earlyprometaphase" />
+    <Class id="2" name="prometaphase" />
+    <Class id="3" name="metaphase" />
+    <Class id="4" name="anaphase" />
+    <Class id="5" name="telophase" />
+  </Classes><BoxTypes>
+    <BoxType id="original" description="Box carried forward from the original CellClicker series annotation." />
+    <BoxType id="otsu" description="Box adjusted by Otsu thresholding." />
+    <BoxType id="sam2" description="Box adjusted by SAM2." />
+    <BoxType id="yolo11_tightened" description="Box adjusted by a trained YOLO11 cell tightener." />
+    <BoxType id="tightened" description="Box manually tightened by a user." />
+  </BoxTypes><Tracks>
+    <Track id="T00001" source_path="C:/Users/Brook/Documents/Work/CelFDrive/sample_labelling_data/images/20241022_SDM_siRDNA_MC225_slide1_max_P01_t017.png" series_id="1" length="4" raw_revision="0" review_state="reviewed">
+      <Timepoint index="2" frame_index="2" image_path="C:\Users\Brook\Documents\Work\CelFDrive\sample_labelling_data\images\20241022_SDM_siRDNA_MC225_slide1_max_P01_t014.png" class_id="0" phase="prophase" source_class_id="3" preferred_box_type="otsu">
+        <Boxes>
+          <Box type="original" format="yolo_xywh_norm" x_center="0.7885174418604651" y_center="0.5222457627118644" width="0.10901162790697674" height="0.09110169491525423" source="cell_regions.xml" />
+          <Box type="otsu" format="yolo_xywh_norm" x_center="0.784156976744186" y_center="0.5286016949152542" width="0.08866279069767442" height="0.0614406779661017" source="otsu_threshold" />
+          <Box type="sam2" format="yolo_xywh_norm" x_center="0.7834302325581395" y_center="0.5270127118644068" width="0.0872093023255814" height="0.0625" source="ultralytics_sam2:sam2_b.pt:point_center:conf=0.9585" />
+        </Boxes>
+      </Timepoint><Timepoint index="3" frame_index="3" image_path="C:\Users\Brook\Documents\Work\CelFDrive\sample_labelling_data\images\20241022_SDM_siRDNA_MC225_slide1_max_P01_t015.png" class_id="1" phase="earlyprometaphase" source_class_id="2" preferred_box_type="otsu">
+        <Boxes>
+          <Box type="original" format="yolo_xywh_norm" x_center="0.7754360465116279" y_center="0.527542372881356" width="0.10901162790697674" height="0.09110169491525423" source="cell_regions.xml" />
+          <Box type="otsu" format="yolo_xywh_norm" x_center="0.7776162790697675" y_center="0.5270127118644068" width="0.09302325581395349" height="0.06673728813559322" source="otsu_threshold" />
+          <Box type="sam2" format="yolo_xywh_norm" x_center="0.7768895348837209" y_center="0.5270127118644068" width="0.09156976744186046" height="0.0646186440677966" source="ultralytics_sam2:sam2_b.pt:point_center:conf=0.8620" />
+        </Boxes>
+      </Timepoint><Timepoint index="4" frame_index="4" image_path="C:\Users\Brook\Documents\Work\CelFDrive\sample_labelling_data\images\20241022_SDM_siRDNA_MC225_slide1_max_P01_t016.png" class_id="2" phase="prometaphase" source_class_id="1" preferred_box_type="otsu">
+        <Boxes>
+          <Box type="original" format="yolo_xywh_norm" x_center="0.778343023255814" y_center="0.5286016949152542" width="0.10901162790697674" height="0.09110169491525423" source="cell_regions.xml" />
+          <Box type="otsu" format="yolo_xywh_norm" x_center="0.7754360465116279" y_center="0.528072033898305" width="0.07994186046511628" height="0.05826271186440678" source="otsu_threshold" />
+          <Box type="sam2" format="yolo_xywh_norm" x_center="0.7747093023255814" y_center="0.5270127118644068" width="0.07848837209302326" height="0.05826271186440678" source="ultralytics_sam2:sam2_b.pt:point_center:conf=0.9356" />
+        </Boxes>
+      </Timepoint><Timepoint index="5" frame_index="5" image_path="C:\Users\Brook\Documents\Work\CelFDrive\sample_labelling_data\images\20241022_SDM_siRDNA_MC225_slide1_max_P01_t017.png" class_id="2" phase="prometaphase" source_class_id="0" preferred_box_type="otsu">
+        <Boxes>
+          <Box type="original" format="yolo_xywh_norm" x_center="0.778343023255814" y_center="0.5296610169491526" width="0.10901162790697674" height="0.09110169491525423" source="cell_regions.xml" />
+          <Box type="otsu" format="yolo_xywh_norm" x_center="0.7856104651162791" y_center="0.528072033898305" width="0.06831395348837209" height="0.06038135593220339" source="otsu_threshold" />
+          <Box type="sam2" format="yolo_xywh_norm" x_center="0.784156976744186" y_center="0.5286016949152542" width="0.06540697674418605" height="0.059322033898305086" source="ultralytics_sam2:sam2_b.pt:point_center:conf=0.9531" />
+        </Boxes>
+      </Timepoint>
+    </Track>
+  </Tracks>
+</TrackingData>

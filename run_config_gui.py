@@ -6,6 +6,7 @@ This module provides a small GUI for editing ``celfdrive_predict.yaml``.
 from pathlib import Path
 import math
 from numbers import Real
+import shutil
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -19,6 +20,9 @@ DEFAULT_CONFIG_PATH = REPO_ROOT / "celfdrive_predict.yaml"
 CONFIG_DIR = REPO_ROOT / "Configs"
 CONFIG_PATH = DEFAULT_CONFIG_PATH
 SLIDEBOOK_SCRIPT_PATH = REPO_ROOT / "SlideBook" / "CelFDrive.sbs"
+SLIDEBOOK_DEFAULT_SCRIPTS_DIRECTORY = Path(
+    r"C:\ProgramData\Intelligent Imaging Innovations\SlideBook 2026\Users\Default User\Scripts"
+)
 
 
 def render_slidebook_script(config):
@@ -33,10 +37,12 @@ def render_slidebook_script(config):
     if not repo_path.is_absolute():
         repo_path = REPO_ROOT / repo_path
     python_path = repo_path.resolve().as_posix()
+    bridge_path = (repo_path / "SlideBook").resolve().as_posix()
     commands = [
         f'Python_SetEnvironment(Environment = "{environment}", UseThread = true)',
         'Python_RunCommand(Command="import sys")',
         f'Python_RunCommand(Command="sys.path.insert(0, r\'{python_path}\')")',
+        f'Python_RunCommand(Command="sys.path.insert(0, r\'{bridge_path}\')")',
     ]
     if search_objective:
         commands.append(f'ChangeObjective(Objective = "{search_objective}")')
@@ -49,6 +55,22 @@ def render_slidebook_script(config):
         ]
     )
     return "\n".join(commands)
+
+
+def deploy_slidebook_script(source_path=SLIDEBOOK_SCRIPT_PATH, scripts_directory=SLIDEBOOK_DEFAULT_SCRIPTS_DIRECTORY):
+    """Copy a generated macro to SlideBook's default shared scripts folder.
+
+    The destination must already exist because its location and permissions are
+    owned by the SlideBook installation, not CelFDrive.
+    """
+    source_path = Path(source_path)
+    scripts_directory = Path(scripts_directory)
+    if not scripts_directory.is_dir():
+        raise FileNotFoundError(
+            "SlideBook scripts folder does not exist: "
+            f"{scripts_directory}. The generated macro remains at {source_path}."
+        )
+    shutil.copyfile(source_path, scripts_directory / source_path.name)
 
 
 def _slidebook_string(value, name):
@@ -728,9 +750,10 @@ class ConfigEditor:
             yaml.safe_dump(self.config, file, sort_keys=False)
 
     def write_slidebook_script(self):
-        """Write the direct-Python SlideBook macro from the current config."""
+        """Write and deploy the direct-Python SlideBook macro from the current config."""
         validate_prediction_config(self.config)
         SLIDEBOOK_SCRIPT_PATH.write_text(render_slidebook_script(self.config), encoding="utf-8")
+        deploy_slidebook_script()
 
     def save_as_config(self):
         """Save the current form to a new editable config in ``Configs``.
@@ -762,9 +785,13 @@ class ConfigEditor:
             messagebox.showerror("Save As failed", f"Configs must be saved in {CONFIG_DIR}")
             return
 
-        self.config_path = selected_path
-        self.write_config(self.config_path)
-        self.write_slidebook_script()
+        try:
+            self.config_path = selected_path
+            self.write_config(self.config_path)
+            self.write_slidebook_script()
+        except Exception as exc:
+            messagebox.showerror("Save As failed", str(exc))
+            return
         self.rebuild_ui()
         self.status_var.set(f"Saved {self.config_path}")
 

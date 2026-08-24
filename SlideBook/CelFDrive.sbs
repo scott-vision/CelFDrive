@@ -1,6 +1,7 @@
 Python_SetEnvironment(Environment = "celfdrive-windows", UseThread = true)
 Python_RunCommand(Command="import sys")
 Python_RunCommand(Command="sys.path.insert(0, r'C:/path/to/CelFDrive')")
+Python_RunCommand(Command="sys.path.insert(0, r'C:/path/to/CelFDrive/SlideBook')")
 Python_RunHierarchicalCaptureFunction(<current image>, Function = "find_locations_of_interest_montage.py")
 ChangeObjective(Objective = "20x Air")
 Run6DCapture()

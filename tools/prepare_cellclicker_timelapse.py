@@ -29,7 +29,7 @@ def create_project(source_position_directory, output_project):
     (output_project / "README.txt").write_text(
         f"CellClicker project generated from {len(frames)} original H2B-mCherry TIFF frames for position {position}.\n"
         "Frames are individually 99.99th-percentile clipped and min-max normalised to 8-bit PNG for display.\n"
-        "Open this project directory in run_gui.py, then select Open CellClicker.\n",
+        "Open this project directory in run_clicker_gui.py, then select Open CellClicker.\n",
         encoding="utf-8",
     )
     return len(frames)

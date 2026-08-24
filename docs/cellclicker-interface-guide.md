@@ -16,7 +16,7 @@ Start the unified interface from the repository root:
 
 ```powershell
 conda activate celfdrive-gpu
-python run_gui.py
+python run_clicker_gui.py
 ```
 
 Most controls provide concise hover tooltips after the pointer rests over them

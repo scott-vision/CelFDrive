@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from run_config_gui import render_slidebook_script
+import pytest
+
+from run_config_gui import deploy_slidebook_script, render_slidebook_script
 from test_config_gui import valid_config
 
 
@@ -16,6 +18,27 @@ def test_render_slidebook_script_uses_the_configured_environment_root_and_object
 
     assert 'Environment = "SlideBookPython"' in script
     assert "sys.path.insert(0, r'" + (tmp_path / "microscope" / "CelFDrive").as_posix() + "')" in script
+    assert "sys.path.insert(0, r'" + (tmp_path / "microscope" / "CelFDrive" / "SlideBook").as_posix() + "')" in script
     assert 'ChangeObjective(Objective = "63x Water")' in script
     assert "Python_RunHierarchicalCaptureFunction" in script
     assert script.index('ChangeObjective(Objective = "20x Air")') < script.index("Python_RunHierarchicalCaptureFunction")
+
+
+def test_deploy_slidebook_script_copies_the_generated_macro(tmp_path):
+    source = tmp_path / "CelFDrive.sbs"
+    source.write_text("macro", encoding="utf-8")
+    destination = tmp_path / "Scripts"
+    destination.mkdir()
+
+    deploy_slidebook_script(source, destination)
+
+    assert (destination / "CelFDrive.sbs").read_text(encoding="utf-8") == "macro"
+
+
+def test_deploy_slidebook_script_reports_a_missing_scripts_folder(tmp_path):
+    source = tmp_path / "CelFDrive.sbs"
+    source.write_text("macro", encoding="utf-8")
+    destination = tmp_path / "missing"
+
+    with pytest.raises(FileNotFoundError, match="SlideBook scripts folder does not exist"):
+        deploy_slidebook_script(source, destination)

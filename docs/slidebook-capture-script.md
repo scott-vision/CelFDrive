@@ -35,10 +35,15 @@ runs the returned 6D capture. It does not use MATLAB.
    objective. Optionally enter **Objective before target search** to add a
    `ChangeObjective(...)` command immediately before target finding. **Save**
    generates `SlideBook/CelFDrive.sbs` with those settings and the configured
-   CelFDrive project root.
-3. Copy the generated `CelFDrive.sbs` into SlideBook's scripts folder and
-   restart SlideBook so it discovers the updated script. The Python bridge
+   CelFDrive project root, then copies it to SlideBook's default shared scripts
+   folder: `C:\ProgramData\Intelligent Imaging Innovations\SlideBook 2026\Users\Default User\Scripts`.
+   If that folder is missing, the editor reports its full path and leaves the
+   generated repository copy in place.
+3. Restart SlideBook so it discovers the updated script. The Python bridge
    imports `predict` from the configured checkout; do not add a MATLAB path.
+   If editing `CelFDrive.sbs` directly, replace both `C:/path/to/CelFDrive`
+   entries with the absolute path to that computer's CelFDrive checkout. The
+   second entry must end in `/SlideBook`.
 
 The supplied macro intentionally does not create a maximum-Z projection. The
 bridge expects the raw montage image in SlideBook's
