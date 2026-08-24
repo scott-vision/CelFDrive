@@ -50,7 +50,7 @@ def valid_config():
             "normalize_min_max": True,
         },
         "inference": {
-            "mode": "standard",
+            "mode": "tiling",
             "sahi": {
                 "confidence_threshold": 0.5,
                 "slice_size_px": 640,
@@ -114,7 +114,7 @@ def test_validate_prediction_config_accepts_a_valid_postscan_profile():
     validate_prediction_config(valid_config())
 
 
-def test_editor_migrates_missing_inference_settings_to_standard_sahi_defaults():
+def test_editor_migrates_missing_inference_settings_to_tiling_sahi_defaults():
     config = valid_config()
     del config["inference"]
     editor = ConfigEditor.__new__(ConfigEditor)
@@ -122,7 +122,7 @@ def test_editor_migrates_missing_inference_settings_to_standard_sahi_defaults():
     editor.migrate_config(config)
 
     assert config["inference"] == {
-        "mode": "standard",
+        "mode": "tiling",
         "sahi": {
             "confidence_threshold": 0.5,
             "slice_size_px": 640,
@@ -150,6 +150,19 @@ def test_editor_uses_prediction_runtime_defaults_for_new_coordinate_and_tiling_s
     assert config["coordinate_conversion"]["merge_tolerance_um"] == 20.0
     assert config["tiling"]["overlap_px"] == 0
     assert config["tiling"]["deduplication_tolerance_px"] == 1.0
+
+
+def test_editor_rebuilds_the_image_tab_when_inference_mode_changes():
+    editor = ConfigEditor.__new__(ConfigEditor)
+    editor.config = valid_config()
+    editor.vars = {("inference", "mode"): (FakeVariable("full_image"), str)}
+    selected_tabs = []
+    editor.rebuild_ui = lambda selected_main_tab=None: selected_tabs.append(selected_main_tab)
+
+    editor.on_inference_mode_changed(None)
+
+    assert editor.config["inference"]["mode"] == "full_image"
+    assert selected_tabs == ["Image"]
 
 
 @pytest.mark.parametrize(

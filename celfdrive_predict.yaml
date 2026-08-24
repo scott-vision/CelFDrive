@@ -25,7 +25,7 @@ preprocessing:
   top_clip_percentile: 0.01
   normalize_min_max: true
 inference:
-  mode: standard
+  mode: tiling
   sahi:
     confidence_threshold: 0.5
     slice_size_px: 640
@@ -33,7 +33,6 @@ inference:
     tile_batch_size: 6
     merge_iou_threshold: 0.1
 tiling:
-  enabled: true
   tile_size_px: 640
   edge_mode: shift_last_tile_inside_image
   overlap_px: 0
@@ -79,25 +78,25 @@ profile:
   classes:
     0:
       name: prophase
-      confidence_threshold: 0.01
+      confidence_threshold: 0.7
       priority_rank: 1
     1:
       name: earlyprometaphase
-      confidence_threshold: 0.01
+      confidence_threshold: 0.7
       priority_rank: 0
     2:
       name: prometaphase
-      confidence_threshold: 0.01
+      confidence_threshold: 0.7
       priority_rank: 2
     3:
       name: metaphase
-      confidence_threshold: 0.01
+      confidence_threshold: 0.7
       priority_rank: 3
     4:
       name: anaphase
-      confidence_threshold: 0.01
+      confidence_threshold: 0.7
       priority_rank: 4
     5:
       name: telophase
-      confidence_threshold: 0.05
+      confidence_threshold: 0.7
       priority_rank: 5

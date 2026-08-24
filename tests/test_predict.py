@@ -19,7 +19,7 @@ def config_for_tests(**overrides):
             "normalize_min_max": True,
         },
         "inference": {
-            "mode": "standard",
+            "mode": "tiling",
             "sahi": {
                 "confidence_threshold": 0.5,
                 "slice_size_px": 640,
@@ -83,7 +83,7 @@ no_detection:
     assert config["coordinate_conversion"]["mode"] == "stage"
     assert config["tiling"]["deduplication_tolerance_px"] == 1.0
     assert config["inference"] == {
-        "mode": "standard",
+        "mode": "tiling",
         "sahi": {
             "confidence_threshold": 0.5,
             "slice_size_px": 640,
@@ -92,6 +92,22 @@ no_detection:
             "merge_iou_threshold": 0.1,
         },
     }
+
+
+def test_load_predict_config_migrates_disabled_legacy_tiling_to_full_image(tmp_path):
+    config_path = tmp_path / "legacy.yaml"
+    config_path.write_text(
+        """schema_version: 1
+tiling:
+  enabled: false
+""",
+        encoding="utf-8",
+    )
+
+    config = predict.load_predict_config(config_path)
+
+    assert config["inference"]["mode"] == "full_image"
+    assert "enabled" not in config["tiling"]
 
 
 def test_get_logging_directory_resolves_relative_log_directory_from_project_root(tmp_path):
@@ -229,6 +245,27 @@ def test_process_image_routes_sahi_without_standard_splitting(monkeypatch):
     assert detections == [[0, 1, 2, 3, 4, 0.9]]
     assert observed["shape"] == (4, 4)
     assert observed["settings"]["merge_iou_threshold"] == 0.1
+
+
+def test_process_image_full_image_mode_does_not_split(monkeypatch):
+    config = config_for_tests()
+    config["inference"]["mode"] = "full_image"
+    predict.configure_prediction_runtime(config)
+    observed = {}
+
+    monkeypatch.setattr(
+        predict,
+        "split_image",
+        lambda _image: pytest.fail("full-image mode must not run the tile splitter"),
+    )
+    monkeypatch.setattr(
+        predict,
+        "run_model_inference",
+        lambda image, confidence: observed.update(shape=image.shape, confidence=confidence) or [],
+    )
+
+    assert predict.process_image(np.zeros((4, 5), dtype=np.uint8)) == []
+    assert observed["shape"] == (4, 5, 3)
 
 
 def test_run_sahi_inference_translates_merges_and_batches(monkeypatch):

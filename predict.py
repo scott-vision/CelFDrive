@@ -145,13 +145,17 @@ def migrate_predict_config(raw_config):
     slidebook = raw_config.setdefault("slidebook", {})
     slidebook.setdefault("objective_offset_um", {"x": 0.0, "y": 0.0, "z": 0.0})
     tiling = raw_config.setdefault("tiling", {})
+    legacy_tiling_enabled = tiling.pop("enabled", True)
     tiling.setdefault("overlap_px", 0)
     tiling.setdefault("deduplication_tolerance_px", 1.0)
     logging = raw_config.setdefault("logging", {})
     timing = logging.setdefault("timing", {})
     timing.setdefault("enabled", True)
     inference = raw_config.setdefault("inference", {})
-    inference.setdefault("mode", "standard")
+    if inference.get("mode", "standard") == "standard":
+        inference["mode"] = "tiling" if legacy_tiling_enabled else "full_image"
+    else:
+        inference.setdefault("mode", "tiling")
     sahi = inference.setdefault("sahi", {})
     sahi.setdefault("confidence_threshold", 0.5)
     sahi.setdefault("slice_size_px", 640)
@@ -840,8 +844,8 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
     processed_img = preprocess_image(raw_img)
     if _timings is not None:
         _timings.preprocessing_s += perf_counter() - preprocessing_started
-    inference_cfg = cfg.get("inference", {"mode": "standard"})
-    inference_mode = inference_cfg.get("mode", "standard")
+    inference_cfg = cfg.get("inference", {"mode": "tiling"})
+    inference_mode = inference_cfg.get("mode", "tiling")
     if inference_mode == "sahi":
         sahi_config = dict(inference_cfg["sahi"])
         if conf is not None:
@@ -850,11 +854,15 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
             results = run_sahi_inference(processed_img, sahi_config)
         else:
             results = run_sahi_inference(processed_img, sahi_config, _timings=_timings)
-    elif inference_mode == "standard":
+    elif inference_mode in {"tiling", "full_image"}:
         if conf is None:
             conf = get_inference_confidence(class_info)
         postprocessing_started = perf_counter()
-        split_images = split_image(processed_img)
+        split_images = (
+            split_image(processed_img)
+            if inference_mode == "tiling"
+            else [(processed_img, 0, 0)]
+        )
         results = []
 
         for img, x_offset, y_offset in split_images:
@@ -885,7 +893,7 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
         if _timings is not None:
             _timings.postprocessing_s += perf_counter() - postprocessing_started
     else:
-        raise ValueError("inference.mode must be 'standard' or 'sahi'")
+        raise ValueError("inference.mode must be 'tiling', 'full_image', or 'sahi'")
 
     if plot:
         logging_started = perf_counter()

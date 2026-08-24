@@ -136,8 +136,8 @@ def validate_prediction_config(config):
     _boolean(preprocessing.get("normalize_min_max"), "preprocessing.normalize_min_max")
 
     inference = _mapping(config.get("inference"), "inference")
-    if inference.get("mode") not in {"standard", "sahi"}:
-        raise ValueError("inference.mode must be 'standard' or 'sahi'")
+    if inference.get("mode") not in {"tiling", "full_image", "sahi"}:
+        raise ValueError("inference.mode must be 'tiling', 'full_image', or 'sahi'")
     sahi = _mapping(inference.get("sahi"), "inference.sahi")
     confidence_threshold = _finite_float(
         sahi.get("confidence_threshold"), "inference.sahi.confidence_threshold"
@@ -156,7 +156,6 @@ def validate_prediction_config(config):
         raise ValueError("inference.sahi.merge_iou_threshold must be between 0 and 1")
 
     tiling = _mapping(config.get("tiling"), "tiling")
-    _boolean(tiling.get("enabled"), "tiling.enabled")
     tile_size_px = _positive_integer(tiling.get("tile_size_px"), "tiling.tile_size_px")
     if tiling.get("edge_mode") != "shift_last_tile_inside_image":
         raise ValueError("tiling.edge_mode must be 'shift_last_tile_inside_image'")
@@ -489,7 +488,7 @@ class ConfigEditor:
         slidebook.setdefault("highres_objective", "20x Air")
         slidebook.setdefault("objective_offset_um", {"x": 0.0, "y": 0.0, "z": 0.0})
         inference = config.setdefault("inference", {})
-        inference.setdefault("mode", "standard")
+        inference.setdefault("mode", "tiling")
         sahi = inference.setdefault("sahi", {})
         sahi.setdefault("confidence_threshold", 0.5)
         sahi.setdefault("slice_size_px", 640)
@@ -878,73 +877,30 @@ class ConfigEditor:
         self.add_field(preprocessing, 3, "Normalize min/max", ["preprocessing", "normalize_min_max"], bool)
 
         inference = self.add_section(parent, "Inference", 1)
-        self.add_dropdown(
+        mode_widget = self.add_dropdown(
             inference,
             0,
             "Mode",
             ["inference", "mode"],
-            ["standard", "sahi"],
+            ["tiling", "full_image", "sahi"],
         )
-        self.add_field(
-            inference,
-            1,
-            "SAHI confidence threshold",
-            ["inference", "sahi", "confidence_threshold"],
-            float,
-        )
-        self.add_field(
-            inference,
-            2,
-            "SAHI slice size px",
-            ["inference", "sahi", "slice_size_px"],
-            int,
-        )
-        self.add_field(
-            inference,
-            3,
-            "SAHI overlap ratio",
-            ["inference", "sahi", "overlap_ratio"],
-            float,
-        )
-        self.add_field(
-            inference,
-            4,
-            "SAHI tile batch size",
-            ["inference", "sahi", "tile_batch_size"],
-            int,
-        )
-        self.add_field(
-            inference,
-            5,
-            "SAHI merge IOU threshold",
-            ["inference", "sahi", "merge_iou_threshold"],
-            float,
-        )
-        self.add_hint(
-            inference,
-            6,
-            "SAHI settings apply only when inference mode is sahi. Merging is class-aware and uses IOU.",
-            columnspan=3,
-        )
-
-        tiling = self.add_section(parent, "Standard Tiling", 2)
-        self.add_field(tiling, 0, "Enabled", ["tiling", "enabled"], bool)
-        self.add_field(tiling, 1, "Tile size px", ["tiling", "tile_size_px"], int)
-        self.add_dropdown(
-            tiling,
-            2,
-            "Edge mode",
-            ["tiling", "edge_mode"],
-            ["shift_last_tile_inside_image"],
-        )
-        self.add_field(tiling, 3, "Overlap px", ["tiling", "overlap_px"], int)
-        self.add_field(tiling, 4, "De-duplication tolerance px", ["tiling", "deduplication_tolerance_px"], float)
-        self.add_hint(
-            tiling,
-            5,
-            "De-duplication compares detection centres in the overview image, before conversion to stage coordinates.",
-            columnspan=3,
-        )
+        mode_widget.bind("<<ComboboxSelected>>", self.on_inference_mode_changed)
+        mode = self.config["inference"]["mode"]
+        if mode == "sahi":
+            self.add_field(inference, 1, "Confidence threshold", ["inference", "sahi", "confidence_threshold"], float)
+            self.add_field(inference, 2, "Slice size px", ["inference", "sahi", "slice_size_px"], int)
+            self.add_field(inference, 3, "Overlap ratio", ["inference", "sahi", "overlap_ratio"], float)
+            self.add_field(inference, 4, "Tile batch size", ["inference", "sahi", "tile_batch_size"], int)
+            self.add_field(inference, 5, "Merge IOU threshold", ["inference", "sahi", "merge_iou_threshold"], float)
+            self.add_hint(inference, 6, "SAHI merging is class-aware and uses IOU.", columnspan=3)
+        elif mode == "tiling":
+            self.add_field(inference, 1, "Tile size px", ["tiling", "tile_size_px"], int)
+            self.add_dropdown(inference, 2, "Edge mode", ["tiling", "edge_mode"], ["shift_last_tile_inside_image"])
+            self.add_field(inference, 3, "Overlap px", ["tiling", "overlap_px"], int)
+            self.add_field(inference, 4, "De-duplication tolerance px", ["tiling", "deduplication_tolerance_px"], float)
+            self.add_hint(inference, 5, "Tiling de-duplicates same-class centres before coordinate conversion.", columnspan=3)
+        else:
+            self.add_hint(inference, 1, "Full image runs one model call on the normalized overview image without tiling.", columnspan=3)
 
     def build_advanced_tab(self, parent):
         """Build advanced logging and plotting detail controls.
@@ -1153,6 +1109,12 @@ class ConfigEditor:
         self.build_ui()
         self.select_tabs(selected_main_tab, selected_profile)
 
+    def on_inference_mode_changed(self, _event):
+        """Rebuild the Image tab to show settings for the selected inference mode."""
+        mode_var, _ = self.vars[("inference", "mode")]
+        self.config["inference"]["mode"] = mode_var.get()
+        self.rebuild_ui(selected_main_tab="Image")
+
     def select_tabs(self, selected_main_tab=None, selected_profile=None):
         """Select main/profile tabs after rebuilding the UI.
 
@@ -1189,7 +1151,7 @@ class ConfigEditor:
         next_class_id = max(numeric_ids, default=-1) + 1
         classes[next_class_id] = {
             "name": f"class_{next_class_id}",
-            "confidence_threshold": 0.01,
+            "confidence_threshold": 0.7,
             "priority_rank": next_class_id,
         }
         self.rebuild_ui(selected_main_tab="High Resolution Imaging")
