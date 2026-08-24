@@ -8,6 +8,9 @@ dependencies:
   # SlideBook's persistent Python process.
   - python=3.11
   - pip
+  # CUDA 12.8 is supported by current Windows NVIDIA production drivers. Do
+  # not let the solver select CUDA 13 unless the acquisition driver is updated.
+  - cuda-version=12.8
   - pytorch-gpu
   - torchvision
   - torchaudio
@@ -38,7 +41,3 @@ dependencies:
   - requests
   - shapely
   - terminaltables
-  - pip:
-      # SAHI has no Conda Forge package. Its dependencies are supplied above.
-      - --no-deps
-      - sahi

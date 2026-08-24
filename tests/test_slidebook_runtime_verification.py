@@ -51,12 +51,38 @@ def test_windows_environments_use_one_conda_forge_native_stack():
         assert "  - nodefaults" in environment
         assert "  - opencv" in environment
         assert "  - pytorch-" in environment
-        assert "  - --no-deps" in environment
         assert "opencv-python" not in environment
         assert "  - torch\n" not in environment
 
     assert "  - pytorch-gpu" in gpu_environment
+    assert "  - cuda-version=12.8" in gpu_environment
     assert "  - pytorch-cpu" in cpu_environment
+
+
+def test_windows_conda_creator_installs_sahi_after_the_conda_solve():
+    """SAHI must not be expressed as an invalid pip option in environment YAML."""
+    creator = (REPOSITORY_ROOT / "tools" / "create_windows_conda_env.ps1").read_text(encoding="utf-8")
+
+    assert "tools\\install_sahi.py" in creator
+    assert "verify_slidebook_runtime.py" in creator
+    assert "Conda could not create" in creator
+    assert "runtime verification failed" in creator
+    assert "--no-deps" not in (
+        REPOSITORY_ROOT / "Environments" / "environment-cpu-windows.yml"
+    ).read_text(encoding="utf-8")
+
+
+def test_macos_environment_uses_the_same_conda_forge_native_stack():
+    """Do not leave a pip OpenCV/Torch mix in the macOS environment file."""
+    environment = (REPOSITORY_ROOT / "Environments" / "environment-gpu-mac.yml").read_text(encoding="utf-8")
+    sahi_installer = (REPOSITORY_ROOT / "tools" / "install_sahi.py").read_text(encoding="utf-8")
+
+    assert "  - conda-forge" in environment
+    assert "  - nodefaults" in environment
+    assert "  - pytorch" in environment
+    assert "  - opencv" in environment
+    assert "opencv-contrib-python" not in environment
+    assert '"--no-deps", "sahi"' in sahi_installer
 
 
 def test_windows_venv_creator_selects_cpu_or_official_cuda_pytorch_wheels():
@@ -68,3 +94,4 @@ def test_windows_venv_creator_selects_cpu_or_official_cuda_pytorch_wheels():
     assert "download.pytorch.org/whl/$CudaWheel" in creator
     assert "requirements-windows-venv.txt" in creator
     assert '".venv-celfdrive-$Device"' in creator
+    assert "Python 3.11 is required" in creator

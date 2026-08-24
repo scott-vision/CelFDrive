@@ -1,9 +1,17 @@
 name: celfdrive-macos
 channels:
   - conda-forge
+  - nodefaults
 dependencies:
+  # Keep the native stack on Conda Forge; install SAHI afterward with
+  # tools/install_sahi.py so pip cannot replace Torch or OpenCV.
   - python=3.11
   - pip
+  - pytorch
+  - torchvision
+  - torchaudio
+  - ultralytics
+  - opencv
   - numpy
   - scipy
   - pandas
@@ -15,18 +23,16 @@ dependencies:
   - tqdm
   - pyyaml
   - pytest
-  - pip:
-      - dill==0.3.8
-      - opencv-contrib-python
-      - networkx==3.2.1
-      - tifffile==2024.2.12
-      - imageio==2.34.0
-      - fsspec==2024.2.0
-      - openpyxl
-      - pyarrow
-      - torch
-      - torchvision
-      - torchaudio
-      - ultralytics
-      - sahi
-      - jupyter
+  - dill=0.3.8
+  - networkx=3.2.1
+  - tifffile=2024.2.12
+  - imageio=2.34.0
+  - fsspec=2024.2.0
+  - openpyxl
+  - pyarrow
+  - jupyter
+  - click
+  - fire
+  - requests
+  - shapely
+  - terminaltables

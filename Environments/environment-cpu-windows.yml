@@ -36,6 +36,3 @@ dependencies:
   - requests
   - shapely
   - terminaltables
-  - pip:
-      - --no-deps
-      - sahi

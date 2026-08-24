@@ -10,15 +10,12 @@ runs the returned 6D capture. It does not use MATLAB.
   environment from the repository root:
 
   ```powershell
-  conda env create -f Environments/environment-gpu-windows.yml
-  conda activate celfdrive-windows
-  python tools/verify_slidebook_runtime.py --device gpu
+  .\tools\create_windows_conda_env.ps1 -Device gpu
   ```
 
   This is a Conda Forge-only GPU environment. To create a CPU-only environment,
-  use `Environments/environment-cpu-windows.yml` and activate
-  `celfdrive-windows-cpu` instead; verify it with
-  `python tools/verify_slidebook_runtime.py --device cpu`.
+  use `.\tools\create_windows_conda_env.ps1 -Device cpu`; it creates and
+  verifies `celfdrive-windows-cpu`.
 
 - Configure SlideBook's Python integration to use that Conda environment. The
   environment must be registered in SlideBook under the same name used by

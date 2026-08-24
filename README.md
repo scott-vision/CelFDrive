@@ -9,14 +9,12 @@ This repository currently supports local development on Windows and macOS with P
 Create the GPU-enabled Windows environment from the repository root:
 
 ```powershell
-conda env create -f Environments/environment-gpu-windows.yml
-conda activate celfdrive-windows
-python tools/verify_slidebook_runtime.py --device gpu
+.\tools\create_windows_conda_env.ps1 -Device gpu
 ```
 
-The Windows environments are Conda Forge-only (`conda-forge` and `nodefaults`): their native scientific stack, OpenCV, and PyTorch all come from one solver, avoiding mixed OpenMP DLLs in SlideBook. The GPU file keeps the existing environment name `celfdrive-windows`. For a computer without an NVIDIA GPU, create `Environments/environment-cpu-windows.yml` instead and activate `celfdrive-windows-cpu`. On macOS, use `Environments/environment-gpu-mac.yml` and activate `celfdrive-macos`.
+The Windows environments are Conda Forge-only (`conda-forge` and `nodefaults`): their native scientific stack, OpenCV, and PyTorch all come from one solver, avoiding mixed OpenMP DLLs in SlideBook. The GPU file keeps the existing environment name `celfdrive-windows`. For a computer without an NVIDIA GPU, create `Environments/environment-cpu-windows.yml` instead and activate `celfdrive-windows-cpu`. On macOS, use `Environments/environment-gpu-mac.yml`, activate `celfdrive-macos`, then run `python tools/install_sahi.py`.
 
-The GPU environment uses Conda Forge's `pytorch-gpu` package. It must pass the runtime verification below before use with SlideBook. Select `gpu` as the inference device in the CelFDrive configuration only after that check succeeds.
+The GPU environment uses Conda Forge's `pytorch-gpu` package with CUDA 12.8. The creator first resolves the native packages, then installs SAHI with `pip --no-deps` so pip cannot replace Conda Forge Torch or OpenCV. It finishes by running the GPU verification. Select `gpu` as the inference device in the CelFDrive configuration only after that check succeeds.
 
 The Windows environments use Conda Forge `opencv`, not pip
 `opencv-python` or `opencv-contrib-python`. CelFDrive does not use

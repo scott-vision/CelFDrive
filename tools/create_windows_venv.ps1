@@ -32,7 +32,10 @@ $pythonLauncher = Get-Command py -ErrorAction SilentlyContinue
 if ($null -ne $pythonLauncher) {
     & $pythonLauncher.Source "-3.11" "-m" "venv" $targetVenv
 } else {
-    & python "-m" "venv" $targetVenv
+    throw "Python 3.11 is required. Install it with the Python launcher ('py -3.11') before creating a CelFDrive venv."
+}
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $targetVenv)) {
+    throw "Could not create the virtual environment with Python 3.11. Install it with the Python launcher ('py -3.11') and retry."
 }
 
 $venvPython = Join-Path $targetVenv "Scripts\python.exe"
