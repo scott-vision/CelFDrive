@@ -1,3 +1,6 @@
+import sys
+import types
+
 import numpy as np
 import pytest
 
@@ -117,6 +120,29 @@ def test_get_logging_directory_resolves_relative_log_directory_from_project_root
     })
 
     assert predict.get_logging_directory() == tmp_path / "Logging"
+
+
+def test_get_model_resolves_relative_weights_from_configured_project_root(tmp_path, monkeypatch):
+    weights_path = tmp_path / "Models" / "model.pt"
+    weights_path.parent.mkdir()
+    weights_path.touch()
+    received = {}
+
+    class FakeYOLO:
+        def __init__(self, path):
+            received["path"] = path
+
+    monkeypatch.setitem(sys.modules, "ultralytics", types.SimpleNamespace(YOLO=FakeYOLO))
+    predict.configure_prediction_runtime(
+        {
+            "project": {"repo_path": str(tmp_path)},
+            "model": {"weights_path": "Models/model.pt", "backend": "ultralytics_yolo"},
+        }
+    )
+
+    predict.get_model()
+
+    assert received["path"] == str(weights_path)
 
 
 def test_experiment_folder_allocator_uses_highest_numeric_suffix(tmp_path):

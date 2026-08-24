@@ -225,6 +225,21 @@ def get_backend(cfg):
         raise ValueError(f"Unsupported model backend: {backend}. Expected one of {sorted(SUPPORTED_BACKENDS)}")
     return backend
 
+
+def get_project_root(cfg=None):
+    """Return the configured CelFDrive project root independent of the CWD.
+
+    SlideBook starts its Python driver from its scripts directory, so relative
+    project paths must be anchored to the CelFDrive checkout rather than the
+    driver's working directory.
+    """
+    if cfg is None:
+        cfg = get_config()
+    project_root = Path(cfg["project"]["repo_path"])
+    if not project_root.is_absolute():
+        project_root = CONFIG_PATH.parent / project_root
+    return project_root.resolve()
+
 def get_model():
     """Load and cache the configured Ultralytics model weights.
 
@@ -237,14 +252,18 @@ def get_model():
 
     cfg = get_config()
     backend = get_backend(cfg)
-    weights_path = cfg["model"]["weights_path"]
+    weights_path = Path(cfg["model"]["weights_path"])
+    if not weights_path.is_absolute():
+        weights_path = get_project_root(cfg) / weights_path
 
     if backend != "ultralytics_yolo":
         raise ValueError(f"Unsupported model backend: {backend}")
 
     from ultralytics import YOLO
 
-    runtime.model = YOLO(weights_path)
+    if not weights_path.is_file():
+        raise FileNotFoundError(f"Configured model weights do not exist: {weights_path}")
+    runtime.model = YOLO(str(weights_path))
     return runtime.model
 
 # Configuration-derived values
@@ -367,7 +386,7 @@ def get_logging_directory():
     logging_cfg = cfg["logging"]
     logging_directory = Path(logging_cfg["root_dir"])
     if not logging_directory.is_absolute():
-        logging_directory = Path(cfg["project"]["repo_path"]) / logging_directory
+        logging_directory = get_project_root(cfg) / logging_directory
     if logging_cfg.get("use_date_subfolder", True):
         today_date = datetime.now().strftime(logging_cfg.get("date_format", "%Y-%m-%d"))
         logging_directory = logging_directory / today_date

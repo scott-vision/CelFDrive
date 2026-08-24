@@ -54,7 +54,7 @@ paper files.
 python run_config_gui.py
 ```
 
-The default configuration assumes commands are run from the repository root and uses the bundled 99.99-percentile YOLO11x weights at `Models/yolo11x_p99p99_bg05/weights/best.pt`. This is a simple relative path, not a value users normally need to edit. In the editor, set **CelFDrive project root** to the folder cloned from GitHub; the default `Logging` directory is created beneath it. Configure capture-script names and class settings for the local experiment. Do not edit Python globals to configure a workflow.
+The default configuration uses the bundled 99.99-percentile YOLO11x weights at `Models/yolo11x_p99p99_bg05/weights/best.pt`. Relative model and logging paths are resolved from **CelFDrive project root**, including when SlideBook starts Python from its scripts directory. In the editor, set **CelFDrive project root** to the folder cloned from GitHub; the default `Logging` directory is created beneath it. Configure capture-script names and class settings for the local experiment. Do not edit Python globals to configure a workflow.
 
 Tiling is the default inference mode. The Image tab provides explicit Tiling, Full image, and SAHI modes, showing only the settings for the selected mode. SAHI uses validated confidence, slice-size, overlap, batch-size, and class-aware IOU merging. See [`examples/max_projection_sahi`](examples/max_projection_sahi) for an executed four-position, three-Z-plane maximum-projection example using 0.315 µm/pixel, SAHI confidence 0.5, and merge IOU 0.1.
 
