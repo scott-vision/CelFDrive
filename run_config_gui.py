@@ -533,7 +533,7 @@ class ConfigEditor:
         self.config_selector.grid(row=0, column=1, sticky="ew")
         ttk.Button(config_bar, text="Load", command=self.load_selected_config).grid(row=0, column=2, padx=(8, 0))
         ttk.Button(config_bar, text="Save As", command=self.save_as_config).grid(row=0, column=3, padx=(8, 0))
-        ttk.Button(config_bar, text="Set as default", command=self.set_default_config).grid(row=0, column=4, padx=(8, 0))
+        ttk.Button(config_bar, text="Use this YAML", command=self.use_selected_config).grid(row=0, column=4, padx=(8, 0))
 
         self.main_notebook = ttk.Notebook(self.root)
         self.main_notebook.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
@@ -802,8 +802,8 @@ class ConfigEditor:
         self.rebuild_ui()
         self.status_var.set(f"Saved {self.config_path}")
 
-    def set_default_config(self):
-        """Save the selected config and copy it to root celfdrive_predict.yaml.
+    def use_selected_config(self):
+        """Save the selected config as the YAML used by CelFDrive prediction.
 
         Args:
             None
@@ -822,11 +822,14 @@ class ConfigEditor:
             self.write_config(DEFAULT_CONFIG_PATH)
             self.write_slidebook_script()
         except Exception as exc:
-            messagebox.showerror("Set default failed", str(exc))
+            messagebox.showerror("Use YAML failed", str(exc))
             return
 
-        self.status_var.set(f"Set {self.config_path.name} as default")
-        messagebox.showinfo("Default updated", f"Wrote {self.config_path.name} to {DEFAULT_CONFIG_PATH.name}")
+        self.status_var.set(f"Using {self.config_path.name} for CelFDrive prediction")
+        messagebox.showinfo(
+            "YAML in use",
+            f"CelFDrive will use {self.config_path.name} for prediction."
+        )
         self.rebuild_ui()
 
     def build_general_tab(self, parent):
@@ -937,7 +940,7 @@ class ConfigEditor:
         self.add_field(logging, 5, "Experiment digits", ["logging", "experiment_folder", "digits"], int)
         self.add_field(logging, 6, "Output image prefix", ["logging", "output_image", "prefix"])
         self.add_field(logging, 7, "Output image digits", ["logging", "output_image", "digits"], int)
-        self.add_field(logging, 8, "Output image extension", ["logging", "output_image", "extension"])
+        self.add_field(logging, 8, "Output image format (.png, .jpg, .tif, .bmp)", ["logging", "output_image", "extension"])
 
         plotting = self.add_section(parent, "Plotting Details", 1)
         self.add_field(plotting, 0, "Color map", ["plotting", "cmap"])

@@ -841,53 +841,77 @@ def global_filter_and_sort_detections(all_detections, class_info):
     )
 
 def plot_image_with_results(image, boxes, class_names, class_info, file_path):
-    """Save an annotated prediction image to ``file_path``."""
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
+    """Save an annotated prediction image using OpenCV's fast image writer."""
+    import cv2
 
     plotting_cfg = get_config()["plotting"]
     bbox_cfg = plotting_cfg["bbox"]
     label_cfg = plotting_cfg["label"]
+    rendered_image = cv2.cvtColor(np.asarray(image, dtype=np.uint8), cv2.COLOR_GRAY2BGR)
 
-    fig, ax = plt.subplots(1)
-    ax.imshow(image, cmap=plotting_cfg.get("cmap", "gray"))
-    ax.axis('off')
+    def color_to_bgr(color, setting_name):
+        named_colors = {
+            "black": (0, 0, 0),
+            "white": (255, 255, 255),
+            "red": (0, 0, 255),
+            "green": (0, 128, 0),
+            "blue": (255, 0, 0),
+            "yellow": (0, 255, 255),
+            "cyan": (255, 255, 0),
+            "magenta": (255, 0, 255),
+        }
+        normalized = color.lower()
+        if normalized in named_colors:
+            return named_colors[normalized]
+        if normalized.startswith("#") and len(normalized) == 7:
+            try:
+                red, green, blue = (int(normalized[index:index + 2], 16) for index in (1, 3, 5))
+            except ValueError as error:
+                raise ValueError(f"{setting_name} must be a named colour or #RRGGBB") from error
+            return blue, green, red
+        raise ValueError(f"{setting_name} must be a named colour or #RRGGBB")
+
+    edge_color = color_to_bgr(bbox_cfg.get("edge_color", "red"), "plotting.bbox.edge_color")
+    text_color = color_to_bgr(label_cfg.get("text_color", "white"), "plotting.label.text_color")
+    background_color = color_to_bgr(label_cfg.get("background_color", "black"), "plotting.label.background_color")
+    line_width = max(1, round(float(bbox_cfg.get("line_width", 1))))
+    font_scale = max(0.25, float(label_cfg.get("font_size", 8)) / 20)
+    font_thickness = max(1, round(font_scale))
+    background_alpha = float(label_cfg.get("background_alpha", 0.5))
 
     filtered_boxes = filter_and_sort_detections(boxes, class_info)
 
     for box in filtered_boxes:
         class_id, x, y, w, h, confidence = box
-        rect = patches.Rectangle(
-            (x, y),
-            w,
-            h,
-            linewidth=bbox_cfg.get("line_width", 1),
-            edgecolor=bbox_cfg.get("edge_color", "red"),
-            facecolor='none',
-        )
-        ax.add_patch(rect)
+        left, top = round(x), round(y)
+        right, bottom = round(x + w), round(y + h)
+        cv2.rectangle(rendered_image, (left, top), (right, bottom), edge_color, line_width)
 
         label = f"{class_names[class_id]}:{confidence:.2f}"
-        ax.text(
-            x,
-            y,
+        (label_width, label_height), baseline = cv2.getTextSize(
+            label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
+        )
+        label_top = max(0, top - label_height - baseline - 2)
+        label_right = min(rendered_image.shape[1] - 1, left + label_width + 2)
+        overlay = rendered_image.copy()
+        cv2.rectangle(overlay, (left, label_top), (label_right, top), background_color, -1)
+        cv2.addWeighted(overlay, background_alpha, rendered_image, 1 - background_alpha, 0, rendered_image)
+        cv2.putText(
+            rendered_image,
             label,
-            color=label_cfg.get("text_color", "white"),
-            fontsize=label_cfg.get("font_size", 8),
-            ha='left',
-            va='bottom',
-            bbox=dict(
-                boxstyle="square,pad=0.1",
-                fc=label_cfg.get("background_color", "black"),
-                ec="none",
-                alpha=label_cfg.get("background_alpha", 0.5),
-            ),
+            (left + 1, max(label_height, top - baseline - 1)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            text_color,
+            font_thickness,
+            cv2.LINE_AA,
         )
 
-    plt.savefig(file_path, bbox_inches='tight', pad_inches=0)
-    plt.close(fig)
+    if not cv2.imwrite(str(file_path), rendered_image):
+        raise ValueError(
+            f"OpenCV could not write prediction image {file_path}. "
+            "Use a supported extension such as .png, .jpg, .tif, or .bmp."
+        )
 
 def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=False, _timings=None):
     """Preprocess an image, run inference, and return pixel-space detections.

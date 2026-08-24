@@ -69,6 +69,9 @@ to complete when a CUDA device is active.
 `logging.prediction_images.enabled` independently controls creation of the
 logging directory, experiment folders, and annotated images. It can be off
 while timing remains on, so hardware callback timings require no file writes.
+Prediction images are off in the supplied YAML files. When enabled, CelFDrive
+uses OpenCV rather than Matplotlib to write them; `.png`, `.jpg`, `.tif`, and
+`.bmp` are supported output formats.
 
 In the configuration editor's **General** tab, set **Inference device** to
 `cpu` or `gpu`. GPU selection requires CUDA to be available in SlideBook's

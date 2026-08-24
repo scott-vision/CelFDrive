@@ -318,6 +318,45 @@ def test_model_inference_passes_the_selected_cpu_device(monkeypatch):
     assert received == {"shape": (4, 5, 3), "confidence": 0.7, "device": "cpu"}
 
 
+def test_prediction_image_writer_uses_opencv_and_respects_the_requested_extension(monkeypatch, tmp_path):
+    calls = {}
+
+    fake_cv2 = types.SimpleNamespace(
+        COLOR_GRAY2BGR=1,
+        FONT_HERSHEY_SIMPLEX=2,
+        LINE_AA=3,
+        cvtColor=lambda image, _code: np.repeat(image[:, :, np.newaxis], 3, axis=2),
+        rectangle=lambda *_args: None,
+        getTextSize=lambda *_args: ((20, 8), 2),
+        addWeighted=lambda _overlay, _alpha, _image, _beta, _gamma, destination: destination,
+        putText=lambda *_args: None,
+        imwrite=lambda path, image: calls.update(path=path, shape=image.shape) or True,
+    )
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+    config = config_for_tests()
+    config["plotting"] = {
+        "bbox": {"edge_color": "red", "line_width": 1},
+        "label": {
+            "font_size": 8,
+            "text_color": "white",
+            "background_color": "black",
+            "background_alpha": 0.5,
+        },
+    }
+    predict.configure_prediction_runtime(config)
+
+    output_path = tmp_path / "prediction.jpg"
+    predict.plot_image_with_results(
+        np.zeros((12, 16), dtype=np.uint8),
+        [[0, 2, 8, 5, 3, 0.9]],
+        {0: "prophase"},
+        {0: ("prophase", 0.5, 0)},
+        output_path,
+    )
+
+    assert calls == {"path": str(output_path), "shape": (12, 16, 3)}
+
+
 def test_suppress_ultralytics_logging_restores_existing_logger_state(monkeypatch):
     logger = logging.getLogger("celfdrive-ultralytics-test")
     logger.disabled = False

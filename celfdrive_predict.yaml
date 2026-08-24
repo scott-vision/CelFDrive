@@ -8,7 +8,7 @@ model:
   suppress_stdout: true
 logging:
   prediction_images:
-    enabled: true
+    enabled: false
   timing:
     enabled: true
   root_dir: Logging

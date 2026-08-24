@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -112,6 +113,14 @@ def valid_config():
 
 def test_validate_prediction_config_accepts_a_valid_postscan_profile():
     validate_prediction_config(valid_config())
+
+
+def test_config_editor_labels_the_active_configuration_action_as_use_this_yaml():
+    source = (Path(__file__).resolve().parents[1] / "run_config_gui.py").read_text(encoding="utf-8")
+
+    assert 'text="Use this YAML"' in source
+    assert "def use_selected_config" in source
+    assert "Set as default" not in source
 
 
 def test_editor_migrates_missing_inference_settings_to_tiling_sahi_defaults():
