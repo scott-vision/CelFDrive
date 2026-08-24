@@ -67,6 +67,20 @@ Use **Refresh Status** after changing files outside this window.
 
 ![Project workflow interface](images/project-workflow.png)
 
+## Screenshot inventory
+
+| Screenshot | Interface shown |
+| --- | --- |
+| `project-workflow.png` | Main CellClicker Project GUI and the complete workflow. |
+| `cellclicker.png` | CellClicker main window for drawing an initial box and navigating tracks. |
+| `cellclicker-inspect.png` | Inspect view for clicking the cell centre in the magnified region. |
+| `phase-settings.png` | Phase selector vocabulary settings. |
+| `phase-selector.png` | Phase Selector for choosing a phase's first visible frame. |
+| `tracking-review.png` | Tracking Review for comparing and selecting box alternatives. |
+| `exported-dataset-viewer.png` | Read-only review of final exported labels. |
+| `yolo-training.png` | YOLO phase-model training interface. |
+| `cell-tightener-training.png` | Cell-tightener training interface. |
+
 The workflow is ordered. Finish every applicable step before moving to the
 next one:
 
@@ -95,6 +109,8 @@ To create a track:
    absent or the series is complete.
 4. Return to the main window and use **Update Progress** if the green
    track boxes are not yet visible.
+
+![CellClicker Inspect view](images/cellclicker-inspect.png)
 
 Green boxes are existing tracks. Right-click a green box and choose
 **Extend earlier** when the same cell has a missing earlier timepoint. This
