@@ -8,9 +8,8 @@ the row axis. Pixel spacing, stage positions, and Z offsets are micrometres.
 from pathlib import Path
 import re
 from datetime import datetime
-import contextlib
+from contextlib import contextmanager
 import math
-import os
 from time import perf_counter
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -613,6 +612,25 @@ def run_model_inference(img, conf):
     raise ValueError(f"Unsupported model backend: {backend}")
 
 
+@contextmanager
+def suppress_ultralytics_logging():
+    """Temporarily silence Ultralytics without replacing or closing stdout.
+
+    SlideBook keeps its Python driver alive in a thread. Redirecting stdout to
+    a temporary file caused Ultralytics' persistent logger to retain a closed
+    stream after the first inference, producing logging errors on every later
+    tile. Disabling only the Ultralytics logger avoids that state change.
+    """
+    from ultralytics.utils import LOGGER
+
+    was_disabled = LOGGER.disabled
+    LOGGER.disabled = True
+    try:
+        yield
+    finally:
+        LOGGER.disabled = was_disabled
+
+
 def _synchronize_cuda():
     """Wait for queued CUDA work when PyTorch has an active CUDA device."""
     try:
@@ -904,9 +922,8 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
             inference_started = perf_counter()
             _synchronize_cuda()
             if cfg["model"].get("suppress_stdout", True):
-                with open(os.devnull, 'w') as nullfile:
-                    with contextlib.redirect_stdout(nullfile):
-                        results_split = run_model_inference(img, conf)
+                with suppress_ultralytics_logging():
+                    results_split = run_model_inference(img, conf)
             else:
                 results_split = run_model_inference(img, conf)
             _synchronize_cuda()

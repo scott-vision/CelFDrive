@@ -1,3 +1,4 @@
+import logging
 import sys
 import types
 
@@ -292,6 +293,18 @@ def test_process_image_full_image_mode_does_not_split(monkeypatch):
 
     assert predict.process_image(np.zeros((4, 5), dtype=np.uint8)) == []
     assert observed["shape"] == (4, 5, 3)
+
+
+def test_suppress_ultralytics_logging_restores_existing_logger_state(monkeypatch):
+    logger = logging.getLogger("celfdrive-ultralytics-test")
+    logger.disabled = False
+    utils_module = types.SimpleNamespace(LOGGER=logger)
+    monkeypatch.setitem(sys.modules, "ultralytics.utils", utils_module)
+
+    with predict.suppress_ultralytics_logging():
+        assert logger.disabled is True
+
+    assert logger.disabled is False
 
 
 def test_run_sahi_inference_translates_merges_and_batches(monkeypatch):
