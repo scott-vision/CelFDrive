@@ -121,6 +121,8 @@ def _expand_config_value(value, root_config):
 
 def migrate_predict_config(raw_config):
     """Migrate a schema-version-1 configuration mapping in place for legacy keys."""
+    model = raw_config.setdefault("model", {})
+    model.setdefault("device", "cpu")
     if "profile" not in raw_config and "profiles" in raw_config:
         raw_config["profile"] = raw_config["profiles"].get("sdc", next(iter(raw_config["profiles"].values())))
         raw_config.pop("profiles", None)
@@ -268,6 +270,29 @@ def get_model():
         raise FileNotFoundError(f"Configured model weights do not exist: {weights_path}")
     runtime.model = YOLO(str(weights_path))
     return runtime.model
+
+
+def get_inference_device(cfg=None):
+    """Return the Ultralytics device selected by configuration.
+
+    ``gpu`` deliberately fails when CUDA is unavailable so a hardware run does
+    not silently fall back to the much slower CPU implementation.
+    """
+    if cfg is None:
+        cfg = get_config()
+    device = cfg["model"].get("device", "cpu")
+    if device == "cpu":
+        return "cpu"
+    if device == "gpu":
+        import torch
+
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "model.device is 'gpu', but CUDA is unavailable in this Python environment. "
+                "Install a CUDA-enabled PyTorch build or select 'cpu' in the CelFDrive configuration."
+            )
+        return 0
+    raise ValueError("model.device must be 'cpu' or 'gpu'")
 
 # Configuration-derived values
 
@@ -607,7 +632,7 @@ def run_model_inference(img, conf):
     current_model = get_model()
 
     if backend == "ultralytics_yolo":
-        results = current_model(img, conf=conf)
+        results = current_model(img, conf=conf, device=get_inference_device())
         return ultralytics_results_to_detections(results, 0, 0)
     raise ValueError(f"Unsupported model backend: {backend}")
 

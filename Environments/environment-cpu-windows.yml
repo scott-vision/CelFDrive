@@ -1,14 +1,12 @@
-name: celfdrive-windows
+name: celfdrive-windows-cpu
 channels:
   - conda-forge
   - nodefaults
 dependencies:
-  # Keep the native stack on Conda Forge. In particular, do not install pip
-  # torch or opencv into this environment: that can load a second OpenMP DLL in
-  # SlideBook's persistent Python process.
+  # Keep the native stack on Conda Forge; see environment-gpu-windows.yml.
   - python=3.11
   - pip
-  - pytorch-gpu
+  - pytorch-cpu
   - torchvision
   - torchaudio
   - ultralytics
@@ -39,6 +37,5 @@ dependencies:
   - shapely
   - terminaltables
   - pip:
-      # SAHI has no Conda Forge package. Its dependencies are supplied above.
       - --no-deps
       - sahi

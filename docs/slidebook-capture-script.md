@@ -12,8 +12,13 @@ runs the returned 6D capture. It does not use MATLAB.
   ```powershell
   conda env create -f Environments/environment-gpu-windows.yml
   conda activate celfdrive-windows
-  python tools/verify_slidebook_runtime.py
+  python tools/verify_slidebook_runtime.py --device gpu
   ```
+
+  This is a Conda Forge-only GPU environment. To create a CPU-only environment,
+  use `Environments/environment-cpu-windows.yml` and activate
+  `celfdrive-windows-cpu` instead; verify it with
+  `python tools/verify_slidebook_runtime.py --device cpu`.
 
 - Configure SlideBook's Python integration to use that Conda environment. The
   environment must be registered in SlideBook under the same name used by
@@ -64,6 +69,11 @@ to complete when a CUDA device is active.
 `logging.prediction_images.enabled` independently controls creation of the
 logging directory, experiment folders, and annotated images. It can be off
 while timing remains on, so hardware callback timings require no file writes.
+
+In the configuration editor's **General** tab, set **Inference device** to
+`cpu` or `gpu`. GPU selection requires CUDA to be available in SlideBook's
+registered Python environment; CelFDrive stops with an actionable error rather
+than silently falling back to CPU.
 
 ## Configure CelFDrive and SlideBook capture scripts
 

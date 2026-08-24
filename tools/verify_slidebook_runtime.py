@@ -7,6 +7,7 @@ the environment.
 """
 
 from pathlib import Path
+import argparse
 import importlib.util
 import sys
 
@@ -45,6 +46,14 @@ def load_tutorial_montage(tif_reader, numpy_module, bridge):
 
 def main():
     """Import, run inference on the tutorial image, and report success."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--device",
+        choices=("cpu", "gpu"),
+        default="cpu",
+        help="Device the bundled inference must use (default: cpu).",
+    )
+    args = parser.parse_args()
     if str(REPOSITORY_ROOT) not in sys.path:
         sys.path.insert(0, str(REPOSITORY_ROOT))
     if not EXAMPLE_IMAGE.is_file():
@@ -68,8 +77,8 @@ def main():
     config["model"]["weights_path"] = str(
         REPOSITORY_ROOT / "Models" / "yolo11x_p99p99_bg05" / "weights" / "best.pt"
     )
-    config["logging"]["enabled"] = False
-    config["plotting"]["enabled"] = False
+    config["model"]["device"] = args.device
+    config["logging"]["prediction_images"]["enabled"] = False
     predict.configure_prediction_runtime(config)
     detections = predict.process_image(
         image,
@@ -78,7 +87,7 @@ def main():
     print(
         "SlideBook runtime verification passed: "
         f"image={EXAMPLE_IMAGE.name}, shape={montage.shape}, "
-        f"detections={len(detections)}, torch={torch.__version__}"
+        f"detections={len(detections)}, device={args.device}, torch={torch.__version__}"
     )
 
 

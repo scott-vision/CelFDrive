@@ -45,7 +45,7 @@ def config_for_tests(**overrides):
         },
         "logging": {"enabled": False},
         "plotting": {"enabled": False},
-        "model": {"suppress_stdout": False},
+        "model": {"device": "cpu", "suppress_stdout": False},
         "profile": {
             "highres_script": "highres",
             "highres_comment": "High resolution",
@@ -293,6 +293,29 @@ def test_process_image_full_image_mode_does_not_split(monkeypatch):
 
     assert predict.process_image(np.zeros((4, 5), dtype=np.uint8)) == []
     assert observed["shape"] == (4, 5, 3)
+
+
+def test_gpu_inference_device_requires_cuda(monkeypatch):
+    fake_torch = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: False))
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    with pytest.raises(RuntimeError, match="CUDA is unavailable"):
+        predict.get_inference_device({"model": {"device": "gpu"}})
+
+
+def test_model_inference_passes_the_selected_cpu_device(monkeypatch):
+    received = {}
+
+    class FakeModel:
+        def __call__(self, image, *, conf, device):
+            received.update(shape=image.shape, confidence=conf, device=device)
+            return [types.SimpleNamespace(boxes=types.SimpleNamespace(xyxy=[]))]
+
+    config = config_for_tests()
+    predict.configure_prediction_runtime(config, model=FakeModel())
+
+    assert predict.run_model_inference(np.zeros((4, 5, 3), dtype=np.uint8), 0.7) == []
+    assert received == {"shape": (4, 5, 3), "confidence": 0.7, "device": "cpu"}
 
 
 def test_suppress_ultralytics_logging_restores_existing_logger_state(monkeypatch):

@@ -6,22 +6,24 @@ This repository currently supports local development on Windows and macOS with P
 
 ## Install
 
-Create the platform environment from the repository root:
+Create the GPU-enabled Windows environment from the repository root:
 
 ```powershell
 conda env create -f Environments/environment-gpu-windows.yml
 conda activate celfdrive-windows
+python tools/verify_slidebook_runtime.py --device gpu
 ```
 
-On macOS, use `Environments/environment-gpu-mac.yml` and activate `celfdrive-macos` instead. The macOS file uses `conda-forge`; the Windows file deliberately installs only Python and pip with Conda, then installs all native scientific packages with pip. This avoids mixing Conda's LLVM OpenMP runtime with pip PyTorch's Intel OpenMP runtime inside SlideBook.
+The Windows environments are Conda Forge-only (`conda-forge` and `nodefaults`): their native scientific stack, OpenCV, and PyTorch all come from one solver, avoiding mixed OpenMP DLLs in SlideBook. The GPU file keeps the existing environment name `celfdrive-windows`. For a computer without an NVIDIA GPU, create `Environments/environment-cpu-windows.yml` instead and activate `celfdrive-windows-cpu`. On macOS, use `Environments/environment-gpu-mac.yml` and activate `celfdrive-macos`.
 
-The Windows environment installs the default PyTorch package. For CUDA acceleration, replace it with the PyTorch wheel command matching your GPU driver from the [official PyTorch installer](https://pytorch.org/get-started/locally/), then rerun the verification commands below. CUDA operation is not verified by this repository's local smoke test.
+The GPU environment uses Conda Forge's `pytorch-gpu` package. It must pass the runtime verification below before use with SlideBook. Select `gpu` as the inference device in the CelFDrive configuration only after that check succeeds.
 
-The Windows environment deliberately installs `opencv-python`, not
-`opencv-contrib-python`: CelFDrive does not use contrib-only OpenCV APIs, and
-installing both distributions can load duplicate OpenMP runtimes in SlideBook.
-When rebuilding an existing Windows environment, remove it first and recreate
-it from the environment file rather than installing packages into the old one.
+The Windows environments use Conda Forge `opencv`, not pip
+`opencv-python` or `opencv-contrib-python`. CelFDrive does not use
+contrib-only APIs, and adding a second OpenCV distribution can load duplicate
+OpenMP runtimes in SlideBook. When rebuilding an existing Windows environment,
+remove it first and recreate it from the environment file rather than
+installing packages into the old one.
 Do not set `KMP_DUPLICATE_LIB_OK=TRUE` as a production workaround: it merely
 suppresses the runtime safety check and can leave acquisition Python unstable.
 
@@ -32,7 +34,7 @@ From the repository root, run:
 ```powershell
 python -m pytest -q
 python examples/run_sample_workflow.py
-python tools/verify_slidebook_runtime.py
+python tools/verify_slidebook_runtime.py --device cpu
 ```
 
 The test suite requires no microscope hardware or downloads. The sample command loads `sample_data/synthetic_blank_image.csv`, runs the bundled model, prints JSON detections, and exits successfully only when they match `sample_data/expected_detections.json`.
@@ -42,7 +44,26 @@ The blank sample is deliberately synthetic because an approved redistributable m
 `tools/verify_slidebook_runtime.py` is the Windows/SlideBook environment smoke
 test. It imports the inference libraries in the order used by a SlideBook
 callback, then processes a tracked TIFF from the max-projection tutorial with
-the bundled model. It must complete before configuring hardware capture.
+the bundled model. It must complete before configuring hardware capture. Pass
+`--device gpu` for the GPU environment; this fails rather than silently using
+CPU when CUDA is unavailable.
+
+### Windows virtual environment alternative
+
+If Conda is not appropriate, create a completely separate pip virtual
+environment—never install these packages into a Conda environment:
+
+```powershell
+.\tools\create_windows_venv.ps1 -Device gpu -CudaWheel cu118
+# Or, for a CPU-only computer:
+.\tools\create_windows_venv.ps1 -Device cpu
+```
+
+The creator uses Python 3.11, installs the selected official PyTorch wheel
+first, installs the remaining pip dependencies, and runs the same runtime
+verification. `cu118` is the default; choose `cu126` or `cu128` only when the
+NVIDIA driver supports it. By default, the two environments use separate
+folders: `.venv-celfdrive-gpu` and `.venv-celfdrive-cpu`.
 
 YOLO phase-model training is available from the unified CellClicker GUI or
 from the same versioned configuration on the command line:

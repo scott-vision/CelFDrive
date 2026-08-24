@@ -1,0 +1,25 @@
+# PyTorch is installed first by tools/create_windows_venv.ps1 so its CPU/CUDA
+# build is selected explicitly. Everything else is then installed from PyPI in
+# this isolated venv; do not use these requirements inside a Conda environment.
+numpy
+scipy
+pandas
+h5py
+matplotlib
+scikit-image
+pillow
+seaborn
+tqdm
+pyyaml
+pytest
+dill==0.3.8
+opencv-python
+networkx==3.2.1
+tifffile==2024.2.12
+imageio==2.34.0
+fsspec==2024.2.0
+openpyxl
+pyarrow
+ultralytics
+sahi
+jupyter

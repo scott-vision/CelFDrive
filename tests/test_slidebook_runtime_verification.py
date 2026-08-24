@@ -36,16 +36,35 @@ def test_slidebook_runtime_tool_uses_tracked_notebook_tiff_and_bridge_conversion
     assert image.dtype == np.uint16
     assert montage.shape == image.shape + (1,)
     np.testing.assert_array_equal(montage[:, :, 0], image)
-    assert "predict.process_image" in TOOL_PATH.read_text(encoding="utf-8")
+    source = TOOL_PATH.read_text(encoding="utf-8")
+    assert "predict.process_image" in source
+    assert '"--device"' in source
 
 
-def test_windows_environment_uses_pip_for_all_native_scientific_packages():
+def test_windows_environments_use_one_conda_forge_native_stack():
     """Prevent reintroducing Conda/pip OpenMP DLL mixing on acquisition PCs."""
-    environment = (REPOSITORY_ROOT / "Environments" / "environment-gpu-windows.yml").read_text(encoding="utf-8")
-    lines = environment.splitlines()
+    gpu_environment = (REPOSITORY_ROOT / "Environments" / "environment-gpu-windows.yml").read_text(encoding="utf-8")
+    cpu_environment = (REPOSITORY_ROOT / "Environments" / "environment-cpu-windows.yml").read_text(encoding="utf-8")
 
-    assert not any(line.strip() == "- conda-forge" for line in lines)
-    assert not any(line.strip() == "- opencv-contrib-python" for line in lines)
-    pip_dependencies = environment.split("  - pip:\n", maxsplit=1)[1]
-    assert "      - numpy" in pip_dependencies
-    assert "      - torch" in pip_dependencies
+    for environment in (gpu_environment, cpu_environment):
+        assert "  - conda-forge" in environment
+        assert "  - nodefaults" in environment
+        assert "  - opencv" in environment
+        assert "  - pytorch-" in environment
+        assert "  - --no-deps" in environment
+        assert "opencv-python" not in environment
+        assert "  - torch\n" not in environment
+
+    assert "  - pytorch-gpu" in gpu_environment
+    assert "  - pytorch-cpu" in cpu_environment
+
+
+def test_windows_venv_creator_selects_cpu_or_official_cuda_pytorch_wheels():
+    """The pip alternative is isolated and selects Torch before app packages."""
+    creator = (REPOSITORY_ROOT / "tools" / "create_windows_venv.ps1").read_text(encoding="utf-8")
+
+    assert "[ValidateSet(\"cpu\", \"gpu\")]" in creator
+    assert "-m\" \"venv" in creator
+    assert "download.pytorch.org/whl/$CudaWheel" in creator
+    assert "requirements-windows-venv.txt" in creator
+    assert '".venv-celfdrive-$Device"' in creator

@@ -4,6 +4,7 @@ project:
 model:
   weights_path: Models/yolo11x_p99p99_bg05/weights/best.pt
   backend: ultralytics_yolo
+  device: cpu
   suppress_stdout: true
 logging:
   prediction_images:

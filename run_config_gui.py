@@ -104,6 +104,8 @@ def validate_prediction_config(config):
     _non_empty_string(model.get("weights_path"), "model.weights_path")
     if model.get("backend") != "ultralytics_yolo":
         raise ValueError("model.backend must be 'ultralytics_yolo'")
+    if model.get("device", "cpu") not in {"cpu", "gpu"}:
+        raise ValueError("model.device must be 'cpu' or 'gpu'")
     _boolean(model.get("suppress_stdout"), "model.suppress_stdout")
 
     logging = _mapping(config.get("logging"), "logging")
@@ -847,7 +849,8 @@ class ConfigEditor:
         self.add_field(project, 1, "CelFDrive project root", ["project", "repo_path"], browse="dir")
         self.add_field(project, 2, "Model weights", ["model", "weights_path"], browse="file")
         self.add_dropdown(project, 3, "Backend", ["model", "backend"], ["ultralytics_yolo"])
-        self.add_field(project, 4, "Suppress model stdout", ["model", "suppress_stdout"], bool)
+        self.add_dropdown(project, 4, "Inference device", ["model", "device"], ["cpu", "gpu"])
+        self.add_field(project, 5, "Suppress model stdout", ["model", "suppress_stdout"], bool)
 
         logging = self.add_section(parent, "Logging", 1)
         self.add_field(logging, 0, "Save prediction images", ["logging", "prediction_images", "enabled"], bool)
