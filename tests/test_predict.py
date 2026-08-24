@@ -408,6 +408,53 @@ def test_get_target_location_ends_workflow_when_no_detection(monkeypatch):
     assert scripts == names == comments == []
 
 
+def test_target_selection_reports_and_retains_hardware_timing(monkeypatch, capsys):
+    predict.configure_prediction_runtime(config_for_tests())
+    monkeypatch.setattr(
+        predict,
+        "process_montage",
+        lambda *args, **kwargs: (np.array([]), np.array([]), np.array([]), []),
+    )
+
+    predict.get_target_locations(
+        stage_x=1,
+        stage_y=2,
+        stage_z=3,
+        image=np.zeros((4, 4, 1), dtype=np.uint8),
+        xy_pixel_spacing_um=1,
+    )
+
+    report = capsys.readouterr().out
+    assert "CelFDrive timing (s):" in report
+    for phase in ("preprocessing", "inference", "postprocessing", "logging", "total"):
+        assert f"{phase}=" in report
+    timings = predict.get_last_prediction_timings()
+    assert timings is not None
+    assert timings.total_s >= 0
+
+
+def test_target_selection_can_disable_timing_output(monkeypatch, capsys):
+    config = config_for_tests()
+    config["logging"]["timing"] = {"enabled": False}
+    predict.configure_prediction_runtime(config)
+    monkeypatch.setattr(
+        predict,
+        "process_montage",
+        lambda *args, **kwargs: (np.array([]), np.array([]), np.array([]), []),
+    )
+
+    predict.get_target_locations(
+        stage_x=1,
+        stage_y=2,
+        stage_z=3,
+        image=np.zeros((4, 4, 1), dtype=np.uint8),
+        xy_pixel_spacing_um=1,
+    )
+
+    assert "CelFDrive timing" not in capsys.readouterr().out
+    assert predict.get_last_prediction_timings() is None
+
+
 def mock_process_image(monkeypatch, detections):
     monkeypatch.setattr(predict, "process_image", lambda *args, **kwargs: detections)
 

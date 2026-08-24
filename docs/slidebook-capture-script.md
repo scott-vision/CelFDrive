@@ -46,6 +46,14 @@ bridge expects the raw montage image in SlideBook's
 `(height, width, position)` order. Do not add a projection command unless the
 bridge is deliberately changed and retested for a two-dimensional input.
 
+When `logging.timing.enabled` is enabled (the default), each successful
+target-selection callback writes one timing line to the Python output:
+preprocessing, inference, postprocessing, logging, and total seconds. Timings
+accumulate across all montage positions; inference timing waits for CUDA work
+to complete when a CUDA device is active. `logging.enabled` independently
+controls creation of the logging directory, experiment folders, and annotated
+images.
+
 ## Configure CelFDrive and SlideBook capture scripts
 
 Run `python run_config_gui.py` and use the **Coordinates** tab to enter the

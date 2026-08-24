@@ -11,6 +11,7 @@ from datetime import datetime
 import contextlib
 import math
 import os
+from time import perf_counter
 from contextvars import ContextVar
 from dataclasses import dataclass
 from numbers import Real
@@ -38,6 +39,34 @@ class PredictionRuntime:
     config: Optional[dict] = None
     model: Optional[object] = None
     experiment_path: Optional[Path] = None
+    last_timings: Optional["PredictionTimings"] = None
+
+
+@dataclass
+class PredictionTimings:
+    """Wall-clock durations accumulated for one target-selection callback.
+
+    Durations are in seconds and include every overview plane in a montage.
+    ``inference_s`` synchronizes CUDA before and after each model invocation so
+    it represents completed GPU work rather than merely queued CUDA kernels.
+    """
+
+    preprocessing_s: float = 0.0
+    inference_s: float = 0.0
+    postprocessing_s: float = 0.0
+    logging_s: float = 0.0
+    total_s: float = 0.0
+
+    def format_report(self):
+        """Return the stable, single-line timing report used by acquisition logs."""
+        return (
+            "CelFDrive timing (s): "
+            f"preprocessing={self.preprocessing_s:.3f}, "
+            f"inference={self.inference_s:.3f}, "
+            f"postprocessing={self.postprocessing_s:.3f}, "
+            f"logging={self.logging_s:.3f}, "
+            f"total={self.total_s:.3f}"
+        )
 
 
 _runtime: ContextVar[Optional[PredictionRuntime]] = ContextVar("prediction_runtime", default=None)
@@ -118,6 +147,9 @@ def migrate_predict_config(raw_config):
     tiling = raw_config.setdefault("tiling", {})
     tiling.setdefault("overlap_px", 0)
     tiling.setdefault("deduplication_tolerance_px", 1.0)
+    logging = raw_config.setdefault("logging", {})
+    timing = logging.setdefault("timing", {})
+    timing.setdefault("enabled", True)
     inference = raw_config.setdefault("inference", {})
     inference.setdefault("mode", "standard")
     sahi = inference.setdefault("sahi", {})
@@ -319,6 +351,11 @@ def _resolve_coordinate_mode(coordinate_mode, coordinate_converter):
 def is_logging_enabled():
     """Return whether prediction logging and plot output are enabled."""
     return get_config()["logging"].get("enabled", True)
+
+
+def is_timing_enabled():
+    """Return whether timing is measured and written to the host Python output."""
+    return get_config()["logging"].get("timing", {}).get("enabled", True)
 
 def get_logging_directory():
     """Return the configured logging directory, including date subfolder if enabled."""
@@ -538,7 +575,17 @@ def run_model_inference(img, conf):
         return ultralytics_results_to_detections(results, 0, 0)
     raise ValueError(f"Unsupported model backend: {backend}")
 
-def run_sahi_inference(img, sahi_config):
+
+def _synchronize_cuda():
+    """Wait for queued CUDA work when PyTorch has an active CUDA device."""
+    try:
+        import torch
+    except ImportError:
+        return
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+def run_sahi_inference(img, sahi_config, _timings=None):
     """Run batched SAHI slicing and class-aware IOU merging on one image.
 
     Parameters
@@ -574,6 +621,7 @@ def run_sahi_inference(img, sahi_config):
     if not 0 <= merge_iou <= 1:
         raise ValueError("inference.sahi.merge_iou_threshold must be between 0 and 1")
 
+    postprocessing_started = perf_counter()
     rgb_image = np.repeat(img[:, :, np.newaxis], 3, axis=2)
     slices = slice_image(
         rgb_image,
@@ -583,11 +631,19 @@ def run_sahi_inference(img, sahi_config):
         overlap_width_ratio=overlap_ratio,
         auto_slice_resolution=False,
     )
+    if _timings is not None:
+        _timings.postprocessing_s += perf_counter() - postprocessing_started
     current_model = get_model()
     object_predictions = []
     for start in range(0, len(slices), tile_batch_size):
+        postprocessing_started = perf_counter()
         batch = slices[start:start + tile_batch_size]
         tile_images = [item["image"][:, :, ::-1] for item in batch]
+        if _timings is not None:
+            _timings.postprocessing_s += perf_counter() - postprocessing_started
+        inference_started = perf_counter()
+        if _timings is not None:
+            _synchronize_cuda()
         results = current_model.predict(
             tile_images,
             imgsz=slice_size,
@@ -595,6 +651,10 @@ def run_sahi_inference(img, sahi_config):
             batch=len(batch),
             verbose=False,
         )
+        if _timings is not None:
+            _synchronize_cuda()
+            _timings.inference_s += perf_counter() - inference_started
+        postprocessing_started = perf_counter()
         for item, result in zip(batch, results):
             shift_x, shift_y = item["starting_pixel"]
             for box, score, class_id in zip(
@@ -618,7 +678,10 @@ def run_sahi_inference(img, sahi_config):
                         full_shape=[img.shape[0], img.shape[1]],
                     )
                 )
+        if _timings is not None:
+            _timings.postprocessing_s += perf_counter() - postprocessing_started
 
+    postprocessing_started = perf_counter()
     postprocess = GreedyNMMPostprocess(
         match_threshold=merge_iou,
         match_metric="IOU",
@@ -637,6 +700,8 @@ def run_sahi_inference(img, sahi_config):
                 float(prediction.score.value),
             ]
         )
+    if _timings is not None:
+        _timings.postprocessing_s += perf_counter() - postprocessing_started
     return detections
 
 def deduplicate_detections(detections, tolerance_px):
@@ -744,7 +809,7 @@ def plot_image_with_results(image, boxes, class_names, class_info, file_path):
     plt.savefig(file_path, bbox_inches='tight', pad_inches=0)
     plt.close(fig)
 
-def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=False):
+def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=False, _timings=None):
     """Preprocess an image, run inference, and return pixel-space detections.
 
     Parameters
@@ -771,29 +836,41 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
     if class_info is None:
         class_info = get_class_info(cfg["profile"])
 
+    preprocessing_started = perf_counter()
     processed_img = preprocess_image(raw_img)
+    if _timings is not None:
+        _timings.preprocessing_s += perf_counter() - preprocessing_started
     inference_cfg = cfg.get("inference", {"mode": "standard"})
     inference_mode = inference_cfg.get("mode", "standard")
     if inference_mode == "sahi":
         sahi_config = dict(inference_cfg["sahi"])
         if conf is not None:
             sahi_config["confidence_threshold"] = conf
-        results = run_sahi_inference(processed_img, sahi_config)
+        if _timings is None:
+            results = run_sahi_inference(processed_img, sahi_config)
+        else:
+            results = run_sahi_inference(processed_img, sahi_config, _timings=_timings)
     elif inference_mode == "standard":
         if conf is None:
             conf = get_inference_confidence(class_info)
+        postprocessing_started = perf_counter()
         split_images = split_image(processed_img)
         results = []
 
         for img, x_offset, y_offset in split_images:
             img = np.repeat(img[:, :, np.newaxis], 3, axis=2)
 
+            inference_started = perf_counter()
+            _synchronize_cuda()
             if cfg["model"].get("suppress_stdout", True):
                 with open(os.devnull, 'w') as nullfile:
                     with contextlib.redirect_stdout(nullfile):
                         results_split = run_model_inference(img, conf)
             else:
                 results_split = run_model_inference(img, conf)
+            _synchronize_cuda()
+            if _timings is not None:
+                _timings.inference_s += perf_counter() - inference_started
 
             for detection in results_split:
                 detection[1] += x_offset
@@ -805,14 +882,19 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
             results,
             tiling_cfg.get("deduplication_tolerance_px", 1.0),
         )
+        if _timings is not None:
+            _timings.postprocessing_s += perf_counter() - postprocessing_started
     else:
         raise ValueError("inference.mode must be 'standard' or 'sahi'")
 
     if plot:
+        logging_started = perf_counter()
         if save_path is None:
             save_path = get_output_image_path()
         class_names = {key: value[0] for key, value in class_info.items()}
         plot_image_with_results(processed_img, results, class_names, class_info, save_path)
+        if _timings is not None:
+            _timings.logging_s += perf_counter() - logging_started
 
     return results
 
@@ -936,6 +1018,7 @@ def process_single_location(
     x_stage_direction,
     y_stage_direction,
     legacy_llsm_y_inversion,
+    timings=None,
 ):
     """Run one overview image and convert its detections to capture targets.
 
@@ -945,12 +1028,16 @@ def process_single_location(
     """
     height, width = image.shape
     plot_enabled = get_config()["plotting"].get("enabled", True) and is_logging_enabled()
+    logging_started = perf_counter()
     img_path = get_output_image_path() if plot_enabled else None
+    if timings is not None:
+        timings.logging_s += perf_counter() - logging_started
     class_names = {key: value[0] for key, value in class_info.items()}
-    results = process_image(image, None, img_path, class_info, plot=plot_enabled)
+    results = process_image(image, None, img_path, class_info, plot=plot_enabled, _timings=timings)
+    postprocessing_started = perf_counter()
     filtered_detections = filter_and_sort_detections(results, class_info)
 
-    return [
+    converted = [
         _convert_detection(
             position,
             _detection_from_values(detection),
@@ -967,6 +1054,9 @@ def process_single_location(
         )
         for detection in filtered_detections
     ]
+    if timings is not None:
+        timings.postprocessing_s += perf_counter() - postprocessing_started
+    return converted
 
 # Montage and capture results
 
@@ -982,6 +1072,7 @@ def process_montage(
     x_stage_direction,
     y_stage_direction,
     legacy_llsm_y_inversion,
+    timings=None,
 ):
     """Process every plane of a montage and return target coordinate arrays.
 
@@ -1011,23 +1102,31 @@ def process_montage(
             x_stage_direction=x_stage_direction,
             y_stage_direction=y_stage_direction,
             legacy_llsm_y_inversion=legacy_llsm_y_inversion,
+            timings=timings,
         )
         if tmp:
             for item in tmp:
                 results.append(item)
 
+    postprocessing_started = perf_counter()
     sorted_results = global_filter_and_sort_detections(results, class_info)
 
     if not sorted_results:
+        if timings is not None:
+            timings.postprocessing_s += perf_counter() - postprocessing_started
         return np.array([]), np.array([]), np.array([]), []
 
     if coordinate_mode == "pixel":
         final_result = np.array(sorted_results, dtype=object)
+        if timings is not None:
+            timings.postprocessing_s += perf_counter() - postprocessing_started
         return final_result[:, 0], final_result[:, 1], final_result[:, 2], list(final_result[:, 5])
 
     final_result = np.array(sorted_results, dtype=object)
     tolerance = get_config()["coordinate_conversion"]["merge_tolerance_um"]
     new_x, new_y, new_z, class_names = merge_close_coordinates(final_result, tolerance)
+    if timings is not None:
+        timings.postprocessing_s += perf_counter() - postprocessing_started
     return new_x, new_y, new_z, class_names
 
 def _capture_result(positions, results, profile_config):
@@ -1116,6 +1215,8 @@ def get_target_locations(
         converter result violates the public contract.
     """
     cfg = get_config()
+    timings = PredictionTimings() if is_timing_enabled() else None
+    total_started = perf_counter() if timings is not None else None
     positions = _capture_positions(stage_x, stage_y, stage_z)
     _validate_image_stack(image, len(positions))
     mode = coordinate_mode or cfg["coordinate_conversion"].get("mode", "stage")
@@ -1135,12 +1236,15 @@ def get_target_locations(
     profile_config = cfg["profile"]
     class_info = get_class_info(profile_config)
     if is_logging_enabled():
+        logging_started = perf_counter()
         logging_directory = get_logging_directory()
         logging_directory.mkdir(parents=True, exist_ok=True)
         get_runtime().experiment_path = create_experiment_folder(
             logging_directory,
             cfg["logging"]["experiment_folder"],
         )
+        if timings is not None:
+            timings.logging_s += perf_counter() - logging_started
 
     montage_results = process_montage(
         positions,
@@ -1153,8 +1257,27 @@ def get_target_locations(
         x_stage_direction=x_direction,
         y_stage_direction=y_direction,
         legacy_llsm_y_inversion=_legacy_llsm_y_inversion,
+        timings=timings,
     )
-    return _capture_result(positions, montage_results, profile_config)
+    postprocessing_started = perf_counter()
+    capture_result = _capture_result(positions, montage_results, profile_config)
+    if timings is not None:
+        timings.postprocessing_s += perf_counter() - postprocessing_started
+        timings.total_s = perf_counter() - total_started
+    get_runtime().last_timings = timings
+    if timings is not None:
+        print(timings.format_report())
+    return capture_result
+
+
+def get_last_prediction_timings():
+    """Return timing measurements from the most recent target-selection call.
+
+    The returned :class:`PredictionTimings` instance holds seconds accumulated
+    over all overview planes in that montage. It is also emitted as one line to
+    the acquisition host's Python output after every successful call.
+    """
+    return get_runtime().last_timings
 
 def get_target_location(X, Y, Z, image, xy_pixel_spacing, z_spacing, x_stage_direction, y_stage_direction, z_stage_direction, LLSM=False, z_offset=None):
     """Legacy positional wrapper for :func:`get_target_locations`.

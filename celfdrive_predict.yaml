@@ -7,6 +7,8 @@ model:
   suppress_stdout: true
 logging:
   enabled: true
+  timing:
+    enabled: true
   root_dir: Logging
   use_date_subfolder: true
   date_format: '%Y-%m-%d'

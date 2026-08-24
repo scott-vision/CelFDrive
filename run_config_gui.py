@@ -86,6 +86,9 @@ def validate_prediction_config(config):
 
     logging = _mapping(config.get("logging"), "logging")
     _boolean(logging.get("enabled"), "logging.enabled")
+    timing = logging.get("timing", {"enabled": True})
+    timing = _mapping(timing, "logging.timing")
+    _boolean(timing.get("enabled"), "logging.timing.enabled")
     _non_empty_string(logging.get("root_dir"), "logging.root_dir")
     _boolean(logging.get("use_date_subfolder"), "logging.use_date_subfolder")
     _non_empty_string(logging.get("date_format"), "logging.date_format")
@@ -471,6 +474,7 @@ class ConfigEditor:
         sahi.setdefault("overlap_ratio", 0.25)
         sahi.setdefault("tile_batch_size", 6)
         sahi.setdefault("merge_iou_threshold", 0.1)
+        config.setdefault("logging", {}).setdefault("timing", {}).setdefault("enabled", True)
 
     def build_ui(self):
         """Create the notebook tabs and bottom action bar.
@@ -815,6 +819,7 @@ class ConfigEditor:
 
         logging = self.add_section(parent, "Logging", 1)
         self.add_field(logging, 0, "Enabled", ["logging", "enabled"], bool)
+        self.add_field(logging, 1, "Report timing", ["logging", "timing", "enabled"], bool)
 
         plotting = self.add_section(parent, "Plotting", 2)
         self.add_field(plotting, 0, "Enabled", ["plotting", "enabled"], bool)

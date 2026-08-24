@@ -131,6 +131,7 @@ def test_editor_migrates_missing_inference_settings_to_standard_sahi_defaults():
             "merge_iou_threshold": 0.1,
         },
     }
+    assert config["logging"]["timing"] == {"enabled": True}
 
 
 def test_editor_uses_prediction_runtime_defaults_for_new_coordinate_and_tiling_settings():
