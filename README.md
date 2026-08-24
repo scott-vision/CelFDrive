@@ -17,6 +17,12 @@ On macOS, use `Environments/environment-gpu-mac.yml` and activate `celfdrive-mac
 
 The Windows environment installs the default PyTorch package. For CUDA acceleration, replace it with the PyTorch wheel command matching your GPU driver from the [official PyTorch installer](https://pytorch.org/get-started/locally/), then rerun the verification commands below. CUDA operation is not verified by this repository's local smoke test.
 
+The Windows environment deliberately installs `opencv-python`, not
+`opencv-contrib-python`: CelFDrive does not use contrib-only OpenCV APIs, and
+installing both distributions can load duplicate OpenMP runtimes in SlideBook.
+When rebuilding an existing Windows environment, remove it first and recreate
+it from the environment file rather than installing packages into the old one.
+
 ## Quick start and local verification
 
 From the repository root, run:

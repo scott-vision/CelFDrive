@@ -12,6 +12,7 @@ runs the returned 6D capture. It does not use MATLAB.
   ```powershell
   conda env create -f Environments/environment-gpu-windows.yml
   conda activate celfdrive-windows
+  python -c "import cv2, torch, ultralytics, sahi; print('runtime imports succeeded')"
   ```
 
 - Configure SlideBook's Python integration to use that Conda environment. The

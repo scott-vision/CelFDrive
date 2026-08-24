@@ -21,7 +21,10 @@ dependencies:
       - torchvision
       - torchaudio
       - dill==0.3.8
-      - opencv-contrib-python
+      # Ultralytics requires opencv-python. Do not install opencv-contrib-python
+      # alongside it: separate OpenCV distributions can load duplicate native
+      # OpenMP runtimes in the SlideBook Python process.
+      - opencv-python
       - networkx==3.2.1
       - tifffile==2024.2.12
       - imageio==2.34.0
