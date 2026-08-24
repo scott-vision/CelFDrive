@@ -149,6 +149,10 @@ def migrate_predict_config(raw_config):
     tiling.setdefault("overlap_px", 0)
     tiling.setdefault("deduplication_tolerance_px", 1.0)
     logging = raw_config.setdefault("logging", {})
+    prediction_images = logging.setdefault("prediction_images", {})
+    legacy_logging_enabled = logging.pop("enabled", True)
+    legacy_plotting_enabled = raw_config.setdefault("plotting", {}).pop("enabled", True)
+    prediction_images.setdefault("enabled", legacy_logging_enabled and legacy_plotting_enabled)
     timing = logging.setdefault("timing", {})
     timing.setdefault("enabled", True)
     inference = raw_config.setdefault("inference", {})
@@ -371,9 +375,19 @@ def _resolve_coordinate_mode(coordinate_mode, coordinate_converter):
 
 # Logging and output allocation
 
-def is_logging_enabled():
-    """Return whether prediction logging and plot output are enabled."""
-    return get_config()["logging"].get("enabled", True)
+def is_prediction_image_logging_enabled():
+    """Return whether annotated prediction images are written to disk.
+
+    Timing reports are intentionally independent: microscopy acquisition can
+    report callback timings without creating logging directories or images.
+    """
+    cfg = get_config()
+    logging_cfg = cfg["logging"]
+    prediction_images = logging_cfg.get("prediction_images")
+    if prediction_images is not None:
+        return prediction_images.get("enabled", True)
+    # Support in-memory legacy configurations supplied by older callers.
+    return logging_cfg.get("enabled", True) and cfg.get("plotting", {}).get("enabled", True)
 
 
 def is_timing_enabled():
@@ -1054,7 +1068,7 @@ def process_single_location(
     in the requested coordinate mode.
     """
     height, width = image.shape
-    plot_enabled = get_config()["plotting"].get("enabled", True) and is_logging_enabled()
+    plot_enabled = is_prediction_image_logging_enabled()
     logging_started = perf_counter()
     img_path = get_output_image_path() if plot_enabled else None
     if timings is not None:
@@ -1262,7 +1276,7 @@ def get_target_locations(
 
     profile_config = cfg["profile"]
     class_info = get_class_info(profile_config)
-    if is_logging_enabled():
+    if is_prediction_image_logging_enabled():
         logging_started = perf_counter()
         logging_directory = get_logging_directory()
         logging_directory.mkdir(parents=True, exist_ok=True)

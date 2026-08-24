@@ -107,7 +107,9 @@ def validate_prediction_config(config):
     _boolean(model.get("suppress_stdout"), "model.suppress_stdout")
 
     logging = _mapping(config.get("logging"), "logging")
-    _boolean(logging.get("enabled"), "logging.enabled")
+    prediction_images = logging.get("prediction_images", {"enabled": logging.get("enabled", True)})
+    prediction_images = _mapping(prediction_images, "logging.prediction_images")
+    _boolean(prediction_images.get("enabled"), "logging.prediction_images.enabled")
     timing = logging.get("timing", {"enabled": True})
     timing = _mapping(timing, "logging.timing")
     _boolean(timing.get("enabled"), "logging.timing.enabled")
@@ -204,7 +206,6 @@ def validate_prediction_config(config):
         _non_empty_string(no_detection.get("empty_3i_capture_script"), "no_detection.empty_3i_capture_script")
 
     plotting = _mapping(config.get("plotting"), "plotting")
-    _boolean(plotting.get("enabled"), "plotting.enabled")
     _non_empty_string(plotting.get("cmap"), "plotting.cmap")
     bbox = _mapping(plotting.get("bbox"), "plotting.bbox")
     _non_empty_string(bbox.get("edge_color"), "plotting.bbox.edge_color")
@@ -495,7 +496,12 @@ class ConfigEditor:
         sahi.setdefault("overlap_ratio", 0.25)
         sahi.setdefault("tile_batch_size", 6)
         sahi.setdefault("merge_iou_threshold", 0.1)
-        config.setdefault("logging", {}).setdefault("timing", {}).setdefault("enabled", True)
+        logging = config.setdefault("logging", {})
+        prediction_images = logging.setdefault("prediction_images", {})
+        legacy_logging_enabled = logging.pop("enabled", True)
+        legacy_plotting_enabled = config.setdefault("plotting", {}).pop("enabled", True)
+        prediction_images.setdefault("enabled", legacy_logging_enabled and legacy_plotting_enabled)
+        logging.setdefault("timing", {}).setdefault("enabled", True)
 
     def build_ui(self):
         """Create the notebook tabs and bottom action bar.
@@ -844,11 +850,14 @@ class ConfigEditor:
         self.add_field(project, 4, "Suppress model stdout", ["model", "suppress_stdout"], bool)
 
         logging = self.add_section(parent, "Logging", 1)
-        self.add_field(logging, 0, "Enabled", ["logging", "enabled"], bool)
+        self.add_field(logging, 0, "Save prediction images", ["logging", "prediction_images", "enabled"], bool)
         self.add_field(logging, 1, "Report timing", ["logging", "timing", "enabled"], bool)
-
-        plotting = self.add_section(parent, "Plotting", 2)
-        self.add_field(plotting, 0, "Enabled", ["plotting", "enabled"], bool)
+        self.add_hint(
+            logging,
+            2,
+            "Timing reports go to the SlideBook Python output and do not create files. Save prediction images creates annotated files in the configured log directory.",
+            columnspan=3,
+        )
 
     def build_image_tab(self, parent):
         """Build controls for preprocessing, tiling, and plotting config.

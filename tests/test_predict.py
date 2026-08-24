@@ -518,6 +518,40 @@ def test_target_selection_can_disable_timing_output(monkeypatch, capsys):
     assert predict.get_last_prediction_timings() is None
 
 
+def test_target_selection_reports_timing_without_creating_prediction_files(monkeypatch, capsys):
+    config = config_for_tests()
+    config["logging"] = {
+        "prediction_images": {"enabled": False},
+        "timing": {"enabled": True},
+        "root_dir": "Logging",
+        "use_date_subfolder": True,
+        "date_format": "%Y-%m-%d",
+        "experiment_folder": {"prefix": "exp", "digits": 3},
+        "output_image": {"prefix": "tmpimg", "digits": 3, "extension": ".png"},
+    }
+    predict.configure_prediction_runtime(config)
+    monkeypatch.setattr(
+        predict,
+        "process_montage",
+        lambda *args, **kwargs: (np.array([]), np.array([]), np.array([]), []),
+    )
+    monkeypatch.setattr(
+        predict,
+        "create_experiment_folder",
+        lambda *args, **kwargs: pytest.fail("timing must not create an experiment folder"),
+    )
+
+    predict.get_target_locations(
+        stage_x=1,
+        stage_y=2,
+        stage_z=3,
+        image=np.zeros((4, 4, 1), dtype=np.uint8),
+        xy_pixel_spacing_um=1,
+    )
+
+    assert "CelFDrive timing (s):" in capsys.readouterr().out
+
+
 def mock_process_image(monkeypatch, detections):
     monkeypatch.setattr(predict, "process_image", lambda *args, **kwargs: detections)
 

@@ -6,7 +6,8 @@ model:
   backend: ultralytics_yolo
   suppress_stdout: true
 logging:
-  enabled: true
+  prediction_images:
+    enabled: true
   timing:
     enabled: true
   root_dir: ${project.repo_path}/Logging
@@ -38,7 +39,6 @@ tiling:
   overlap_px: 0
   deduplication_tolerance_px: 1.0
 plotting:
-  enabled: true
   cmap: gray
   bbox:
     edge_color: red
