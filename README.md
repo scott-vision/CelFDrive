@@ -13,7 +13,7 @@ conda env create -f Environments/environment-gpu-windows.yml
 conda activate celfdrive-windows
 ```
 
-On macOS, use `Environments/environment-gpu-mac.yml` and activate `celfdrive-macos` instead. Both environment files use `conda-forge` as their only Conda channel. PyTorch and model packages are installed with pip according to their vendor distribution.
+On macOS, use `Environments/environment-gpu-mac.yml` and activate `celfdrive-macos` instead. The macOS file uses `conda-forge`; the Windows file deliberately installs only Python and pip with Conda, then installs all native scientific packages with pip. This avoids mixing Conda's LLVM OpenMP runtime with pip PyTorch's Intel OpenMP runtime inside SlideBook.
 
 The Windows environment installs the default PyTorch package. For CUDA acceleration, replace it with the PyTorch wheel command matching your GPU driver from the [official PyTorch installer](https://pytorch.org/get-started/locally/), then rerun the verification commands below. CUDA operation is not verified by this repository's local smoke test.
 
@@ -22,6 +22,8 @@ The Windows environment deliberately installs `opencv-python`, not
 installing both distributions can load duplicate OpenMP runtimes in SlideBook.
 When rebuilding an existing Windows environment, remove it first and recreate
 it from the environment file rather than installing packages into the old one.
+Do not set `KMP_DUPLICATE_LIB_OK=TRUE` as a production workaround: it merely
+suppresses the runtime safety check and can leave acquisition Python unstable.
 
 ## Quick start and local verification
 
@@ -30,11 +32,17 @@ From the repository root, run:
 ```powershell
 python -m pytest -q
 python examples/run_sample_workflow.py
+python tools/verify_slidebook_runtime.py
 ```
 
 The test suite requires no microscope hardware or downloads. The sample command loads `sample_data/synthetic_blank_image.csv`, runs the bundled model, prints JSON detections, and exits successfully only when they match `sample_data/expected_detections.json`.
 
 The blank sample is deliberately synthetic because an approved redistributable microscopy subset is not yet included. See [sample_data/README.md](sample_data/README.md) before treating it as anything other than an installation check.
+
+`tools/verify_slidebook_runtime.py` is the Windows/SlideBook environment smoke
+test. It imports the inference libraries in the order used by a SlideBook
+callback, then processes a tracked TIFF from the max-projection tutorial with
+the bundled model. It must complete before configuring hardware capture.
 
 YOLO phase-model training is available from the unified CellClicker GUI or
 from the same versioned configuration on the command line:

@@ -1,21 +1,22 @@
 name: celfdrive-windows
-channels:
-  - conda-forge
 dependencies:
   - python=3.11
   - pip
-  - numpy
-  - scipy
-  - pandas
-  - h5py
-  - matplotlib
-  - scikit-image
-  - pillow
-  - seaborn
-  - tqdm
-  - pyyaml
-  - pytest
   - pip:
+      # Keep native scientific packages on one (pip) distribution.  Mixing
+      # conda-forge's LLVM OpenMP runtime (libomp.dll) with pip PyTorch's Intel
+      # runtime (libiomp5md.dll) aborts the in-process Python used by SlideBook.
+      - numpy
+      - scipy
+      - pandas
+      - h5py
+      - matplotlib
+      - scikit-image
+      - pillow
+      - seaborn
+      - tqdm
+      - pyyaml
+      - pytest
       # Install a CUDA-enabled PyTorch build separately when required; see README.
       - torch
       - torchvision

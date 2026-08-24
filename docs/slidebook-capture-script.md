@@ -12,12 +12,16 @@ runs the returned 6D capture. It does not use MATLAB.
   ```powershell
   conda env create -f Environments/environment-gpu-windows.yml
   conda activate celfdrive-windows
-  python -c "import cv2, torch, ultralytics, sahi; print('runtime imports succeeded')"
+  python tools/verify_slidebook_runtime.py
   ```
 
 - Configure SlideBook's Python integration to use that Conda environment. The
   environment must be registered in SlideBook under the same name used by
   `Python_SetEnvironment`; merely creating it with Conda is not sufficient.
+- If an older `celfdrive-windows` environment exists, remove it before creating
+  this one: `conda env remove --name celfdrive-windows`. Do not set
+  `KMP_DUPLICATE_LIB_OK`; a successful `tools/verify_slidebook_runtime.py` run
+  is the required OpenMP compatibility check.
 - In the SlideBook Python console or a temporary test script, verify that the
   selected interpreter imports `numpy`, `ultralytics`, and `predict` after the
   CelFDrive checkout is added to `sys.path`.
