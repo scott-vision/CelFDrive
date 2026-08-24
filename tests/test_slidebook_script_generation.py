@@ -16,6 +16,7 @@ def test_render_slidebook_script_uses_the_configured_environment_root_and_object
 
     assert 'Environment = "SlideBookPython"' in script
     assert "sys.path.insert(0, r'" + (tmp_path / "microscope" / "CelFDrive").as_posix() + "')" in script
+    assert "sys.path.insert(0, r'" + (tmp_path / "microscope" / "CelFDrive" / "SlideBook").as_posix() + "')" in script
     assert 'ChangeObjective(Objective = "63x Water")' in script
     assert "Python_RunHierarchicalCaptureFunction" in script
     assert script.index('ChangeObjective(Objective = "20x Air")') < script.index("Python_RunHierarchicalCaptureFunction")

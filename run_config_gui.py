@@ -33,10 +33,12 @@ def render_slidebook_script(config):
     if not repo_path.is_absolute():
         repo_path = REPO_ROOT / repo_path
     python_path = repo_path.resolve().as_posix()
+    bridge_path = (repo_path / "SlideBook").resolve().as_posix()
     commands = [
         f'Python_SetEnvironment(Environment = "{environment}", UseThread = true)',
         'Python_RunCommand(Command="import sys")',
         f'Python_RunCommand(Command="sys.path.insert(0, r\'{python_path}\')")',
+        f'Python_RunCommand(Command="sys.path.insert(0, r\'{bridge_path}\')")',
     ]
     if search_objective:
         commands.append(f'ChangeObjective(Objective = "{search_objective}")')
