@@ -34,7 +34,11 @@ from .duplicate_tracks import find_near_duplicate_tracks
 from .project_reconciliation import delete_track_from_project
 from .phase_settings import DEFAULT_PHASES, load_phases, phase_signature, save_phases, settings_path
 from .tooltips import add_tooltip
-from .project_paths import CELL_REGIONS_FILENAME, resolve_cell_regions_xml
+from .project_paths import (
+    CELL_REGIONS_FILENAME,
+    migrate_legacy_cell_regions_xml,
+    resolve_cell_regions_xml,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -223,12 +227,20 @@ class ProjectGUI:
         self.project_dir = os.path.normpath(project_dir)
         self.project_var.set(f"Project: {self.project_dir}")
         resolution = resolve_cell_regions_xml(self.project_dir)
-        if resolution.migrated_legacy_file:
-            messagebox.showinfo(
-                "Annotation File Renamed",
-                "Renamed legacy images/cell_reigons.xml to images/cell_regions.xml.",
-                parent=self.root,
-            )
+        if resolution.using_legacy_file and messagebox.askyesno(
+            "Migrate Annotation File?",
+            "This project uses the legacy images/cell_reigons.xml filename.\n\n"
+            "Rename it to images/cell_regions.xml now? Selecting No keeps the "
+            "legacy file unchanged and CelFDrive will continue to use it.",
+            parent=self.root,
+        ):
+            resolution = migrate_legacy_cell_regions_xml(self.project_dir)
+            if resolution.migrated_legacy_file:
+                messagebox.showinfo(
+                    "Annotation File Migrated",
+                    "Renamed legacy images/cell_reigons.xml to images/cell_regions.xml.",
+                    parent=self.root,
+                )
         if resolution.both_files_present:
             messagebox.showwarning(
                 "Duplicate Annotation Files",
@@ -327,12 +339,17 @@ class ProjectGUI:
 
         images_dir = os.path.join(self.project_dir, "images")
         selections_dir = os.path.join(self.project_dir, "user_selections")
-        cell_xml = resolve_cell_regions_xml(self.project_dir).path
+        resolution = resolve_cell_regions_xml(self.project_dir)
+        cell_xml = resolution.path
         aggregated_xml = os.path.join(selections_dir, "aggregated_tracking.xml")
         tracking_xml = os.path.join(selections_dir, "tracking_review.xml")
 
         self.images_status_var.set(f"images/: {'found' if os.path.isdir(images_dir) else 'missing'}")
-        self.cell_xml_status_var.set(f"{CELL_REGIONS_FILENAME}: {'found' if cell_xml.is_file() else 'missing'}")
+        if cell_xml.is_file():
+            xml_status = "found (legacy file in use)" if resolution.using_legacy_file else "found"
+        else:
+            xml_status = "missing"
+        self.cell_xml_status_var.set(f"{cell_xml.name}: {xml_status}")
         self.user_selections_status_var.set(f"user_selections/: {'found' if os.path.isdir(selections_dir) else 'missing'}")
         self.aggregated_status_var.set(f"aggregated_tracking.xml: {'found' if os.path.exists(aggregated_xml) else 'missing'}")
         self.tracking_status_var.set(f"tracking_review.xml: {'found' if os.path.exists(tracking_xml) else 'missing'}")

@@ -11,6 +11,8 @@ from tkinter import filedialog, messagebox, ttk
 
 import yaml
 
+from predict import migrate_predict_config
+
 
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = REPO_ROOT / "celfdrive_predict.yaml"
@@ -446,7 +448,7 @@ class ConfigEditor:
         return config
 
     def migrate_config(self, config):
-        """Update older config shapes to the current single-profile schema.
+        """Update older config shapes to the current prediction schema.
 
         Args:
             config (dict): Parsed YAML config to migrate in place.
@@ -454,22 +456,7 @@ class ConfigEditor:
         Returns:
             None
         """
-        if "profile" not in config and "profiles" in config:
-            config["profile"] = config["profiles"].get("sdc", next(iter(config["profiles"].values())))
-            config.pop("profiles", None)
-            config["profile"].pop("llsm", None)
-        no_detection = config.get("no_detection", {})
-        if "mode" not in no_detection:
-            if no_detection.get("return_original_first_position", True):
-                no_detection["mode"] = "empty_3i_capture_script"
-            else:
-                no_detection["mode"] = "end_workflow"
-        if no_detection.get("mode") == "do_nothing":
-            no_detection["mode"] = "end_workflow"
-        if "empty_3i_capture_script" not in no_detection:
-            no_detection["empty_3i_capture_script"] = no_detection.get("script", "donothing")
-        for key in ["n_returned_locations", "script", "name", "comment", "return_original_first_position"]:
-            no_detection.pop(key, None)
+        migrate_predict_config(config)
         slidebook = config.setdefault("slidebook", {})
         slidebook.setdefault("python_environment", "celfdrive-windows")
         if "objective_before_target_search" not in slidebook:

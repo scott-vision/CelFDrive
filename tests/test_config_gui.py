@@ -133,6 +133,24 @@ def test_editor_migrates_missing_inference_settings_to_standard_sahi_defaults():
     }
 
 
+def test_editor_uses_prediction_runtime_defaults_for_new_coordinate_and_tiling_settings():
+    config = valid_config()
+    del config["coordinate_conversion"]["mode"]
+    del config["coordinate_conversion"]["default_z_offset_um"]
+    del config["coordinate_conversion"]["merge_tolerance_um"]
+    del config["tiling"]["overlap_px"]
+    del config["tiling"]["deduplication_tolerance_px"]
+    editor = ConfigEditor.__new__(ConfigEditor)
+
+    editor.migrate_config(config)
+
+    assert config["coordinate_conversion"]["mode"] == "stage"
+    assert config["coordinate_conversion"]["default_z_offset_um"] == 0.0
+    assert config["coordinate_conversion"]["merge_tolerance_um"] == 20.0
+    assert config["tiling"]["overlap_px"] == 0
+    assert config["tiling"]["deduplication_tolerance_px"] == 1.0
+
+
 @pytest.mark.parametrize(
     ("update", "message"),
     [

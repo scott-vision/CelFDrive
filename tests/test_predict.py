@@ -378,6 +378,10 @@ def test_coordinate_conversion_applies_spacing_and_llsm_y_inversion():
     assert converted == [20.0, 25.0, 5, 0.9, 1, "prometaphase"]
 
 
+def test_legacy_coordinate_helper_name_aliases_the_corrected_helper():
+    assert predict.image_cordinates_to_physical is predict.image_coordinates_to_physical
+
+
 def test_get_target_location_ends_workflow_when_no_detection(monkeypatch):
     predict.configure_prediction_runtime(config_for_tests())
     monkeypatch.setattr(

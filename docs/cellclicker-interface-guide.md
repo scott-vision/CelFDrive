@@ -32,10 +32,12 @@ YOLO11 training, SAM2, and the trained tightener additionally require
 
 A project directory must contain `images/`. The raw CellClicker track file is
 `images/cell_regions.xml`. Existing projects containing only the legacy
-misspelling `cell_reigons.xml` are renamed when loaded. If both files are
-present, the interface warns the user and uses `cell_regions.xml`; it leaves
-both files unchanged. The interface writes all downstream workflow files below
-`user_selections/`.
+misspelling `cell_reigons.xml` remain usable unchanged. When such a project is
+loaded, the interface offers to rename the file to `cell_regions.xml`; choosing
+No continues with the legacy file. Library and command-line lookups do not
+rename files. If both files are present, the interface warns the user and uses
+`cell_regions.xml`; it leaves both files unchanged. The interface writes all
+downstream workflow files below `user_selections/`.
 
 The GUI creates `user_selections/` when phase annotations are first saved.
 Projects may be moved as complete folders. If a moved project's

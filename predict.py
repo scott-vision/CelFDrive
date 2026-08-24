@@ -14,6 +14,7 @@ import os
 from contextvars import ContextVar
 from dataclasses import dataclass
 from numbers import Real
+from typing import Optional
 
 import numpy as np
 import yaml
@@ -23,6 +24,9 @@ CONFIG_PATH = Path(__file__).resolve().parent / "celfdrive_predict.yaml"
 CONFIG_REF_PATTERN = re.compile(r"\$\{([^}]+)\}")
 SUPPORTED_BACKENDS = {"ultralytics_yolo"}
 
+
+# Runtime state
+
 @dataclass
 class PredictionRuntime:
     """Mutable resources belonging to one prediction workflow invocation.
@@ -31,12 +35,12 @@ class PredictionRuntime:
     changing another workflow's model, configuration, or logging directory.
     """
 
-    config: dict | None = None
-    model: object | None = None
-    experiment_path: Path | None = None
+    config: Optional[dict] = None
+    model: Optional[object] = None
+    experiment_path: Optional[Path] = None
 
 
-_runtime: ContextVar[PredictionRuntime | None] = ContextVar("prediction_runtime", default=None)
+_runtime: ContextVar[Optional[PredictionRuntime]] = ContextVar("prediction_runtime", default=None)
 
 
 @dataclass(frozen=True)
@@ -58,7 +62,6 @@ class Detection:
     def centre_y(self):
         return self.y + self.height / 2
 
-
 @dataclass(frozen=True)
 class CapturePosition:
     """The physical stage position associated with one overview image."""
@@ -67,13 +70,13 @@ class CapturePosition:
     y: float
     z: float
 
+# Configuration
 
 def _get_nested_value(data, dotted_key):
     value = data
     for part in dotted_key.split("."):
         value = value[part]
     return value
-
 
 def _expand_config_value(value, root_config):
     if isinstance(value, str):
@@ -87,38 +90,6 @@ def _expand_config_value(value, root_config):
     if isinstance(value, list):
         return [_expand_config_value(item, root_config) for item in value]
     return value
-
-
-def load_predict_config(config_path=CONFIG_PATH):
-    """Load, migrate, and expand a CelFDrive prediction configuration file.
-
-    Parameters
-    ----------
-    config_path : path-like
-        YAML document using schema version 1.
-
-    Returns
-    -------
-    dict
-        Effective configuration after in-place legacy migration and ``${...}``
-        reference expansion.
-
-    Raises
-    ------
-    ValueError
-        If the YAML declares an unsupported schema version.
-    """
-    with open(config_path, "r", encoding="utf-8") as file:
-        raw_config = yaml.safe_load(file)
-
-    if not isinstance(raw_config, dict):
-        raise ValueError("celfdrive_predict.yaml must contain a YAML mapping")
-    if raw_config.get("schema_version") != 1:
-        raise ValueError("Unsupported celfdrive_predict.yaml schema_version")
-
-    migrate_predict_config(raw_config)
-    return _expand_config_value(raw_config, raw_config)
-
 
 def migrate_predict_config(raw_config):
     """Migrate a schema-version-1 configuration mapping in place for legacy keys."""
@@ -156,6 +127,37 @@ def migrate_predict_config(raw_config):
     sahi.setdefault("tile_batch_size", 6)
     sahi.setdefault("merge_iou_threshold", 0.1)
 
+def load_predict_config(config_path=CONFIG_PATH):
+    """Load, migrate, and expand a CelFDrive prediction configuration file.
+
+    Parameters
+    ----------
+    config_path : path-like
+        YAML document using schema version 1.
+
+    Returns
+    -------
+    dict
+        Effective configuration after in-place legacy migration and ``${...}``
+        reference expansion.
+
+    Raises
+    ------
+    ValueError
+        If the YAML declares an unsupported schema version.
+    """
+    with open(config_path, "r", encoding="utf-8") as file:
+        raw_config = yaml.safe_load(file)
+
+    if not isinstance(raw_config, dict):
+        raise ValueError("celfdrive_predict.yaml must contain a YAML mapping")
+    if raw_config.get("schema_version") != 1:
+        raise ValueError("Unsupported celfdrive_predict.yaml schema_version")
+
+    migrate_predict_config(raw_config)
+    return _expand_config_value(raw_config, raw_config)
+
+# Runtime and configured model
 
 def configure_prediction_runtime(config, model=None):
     """Set the prediction resources for the current execution context.
@@ -168,7 +170,6 @@ def configure_prediction_runtime(config, model=None):
         raise TypeError("config must be a mapping")
     _runtime.set(PredictionRuntime(config=config, model=model))
 
-
 def get_runtime():
     """Return this context's runtime, loading the default config on first use."""
     runtime = _runtime.get()
@@ -177,11 +178,16 @@ def get_runtime():
         _runtime.set(runtime)
     return runtime
 
-
 def get_config():
     """Return the effective configuration for the current execution context."""
     return get_runtime().config
 
+def get_backend(cfg):
+    """Validate and return the configured inference backend identifier."""
+    backend = cfg["model"].get("backend", "ultralytics_yolo")
+    if backend not in SUPPORTED_BACKENDS:
+        raise ValueError(f"Unsupported model backend: {backend}. Expected one of {sorted(SUPPORTED_BACKENDS)}")
+    return backend
 
 def get_model():
     """Load and cache the configured Ultralytics model weights.
@@ -205,14 +211,7 @@ def get_model():
     runtime.model = YOLO(weights_path)
     return runtime.model
 
-
-def get_backend(cfg):
-    """Validate and return the configured inference backend identifier."""
-    backend = cfg["model"].get("backend", "ultralytics_yolo")
-    if backend not in SUPPORTED_BACKENDS:
-        raise ValueError(f"Unsupported model backend: {backend}. Expected one of {sorted(SUPPORTED_BACKENDS)}")
-    return backend
-
+# Configuration-derived values
 
 def get_class_info(profile_config):
     """Return class names, confidence thresholds, and priorities by class ID.
@@ -238,18 +237,88 @@ def get_class_info(profile_config):
         for class_id, class_config in profile_config["classes"].items()
     }
 
-
 def get_inference_confidence(class_info):
     """Return the lowest class threshold needed to retain filterable detections."""
     # YOLO applies this threshold before class-specific filtering, so it must be
     # the lowest class confidence threshold to keep all later-filterable detections.
     return min(class_config[1] for class_config in class_info.values())
 
+# Input validation
+
+def _finite_number(value, name):
+    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value):
+        raise TypeError(f"{name} must be a finite number")
+    return float(value)
+
+def _positive_number(value, name):
+    numeric_value = _finite_number(value, name)
+    if numeric_value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return numeric_value
+
+def _stage_direction(value, name):
+    numeric_value = _finite_number(value, name)
+    if numeric_value not in {-1.0, 1.0}:
+        raise ValueError(f"{name} must be -1 or 1")
+    return int(numeric_value)
+
+def _positive_integer(value, name):
+    if isinstance(value, bool) or not isinstance(value, Real) or int(value) != value or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(value)
+
+def _non_negative_integer(value, name):
+    if isinstance(value, bool) or not isinstance(value, Real) or int(value) != value or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return int(value)
+
+def _capture_positions(stage_x, stage_y, stage_z):
+    scalar_inputs = [stage_x, stage_y, stage_z]
+    if all(isinstance(value, Real) and not isinstance(value, bool) for value in scalar_inputs):
+        return [
+            CapturePosition(
+                _finite_number(stage_x, "stage_x"),
+                _finite_number(stage_y, "stage_y"),
+                _finite_number(stage_z, "stage_z"),
+            )
+        ]
+
+    try:
+        axes = [np.asarray(axis, dtype=float) for axis in scalar_inputs]
+    except (TypeError, ValueError) as error:
+        raise TypeError("stage_x, stage_y, and stage_z must be numeric scalars or one-dimensional sequences") from error
+    if any(axis.ndim != 1 for axis in axes):
+        raise ValueError("stage_x, stage_y, and stage_z sequences must be one-dimensional")
+    if not axes[0].size or len({axis.size for axis in axes}) != 1:
+        raise ValueError("stage_x, stage_y, and stage_z must be non-empty sequences of equal length")
+    if not all(np.isfinite(axis).all() for axis in axes):
+        raise ValueError("stage coordinates must be finite")
+    return [CapturePosition(float(x), float(y), float(z)) for x, y, z in zip(*axes)]
+
+def _validate_image_stack(image, position_count):
+    if not isinstance(image, np.ndarray):
+        raise TypeError("image must be a numpy.ndarray shaped (height, width, position)")
+    if image.ndim != 3:
+        raise ValueError("image must have shape (height, width, position)")
+    if image.shape[0] == 0 or image.shape[1] == 0:
+        raise ValueError("image must have non-empty height and width")
+    if image.shape[2] != position_count:
+        raise ValueError("image position axis must match the number of stage positions")
+
+def _resolve_coordinate_mode(coordinate_mode, coordinate_converter):
+    valid_modes = {"pixel", "stage", "callable"}
+    if coordinate_mode not in valid_modes:
+        raise ValueError(f"coordinate_mode must be one of {sorted(valid_modes)}")
+    if coordinate_mode == "callable" and not callable(coordinate_converter):
+        raise TypeError("coordinate_converter must be callable when coordinate_mode is 'callable'")
+    if coordinate_mode != "callable" and coordinate_converter is not None:
+        raise ValueError("coordinate_converter can only be used when coordinate_mode is 'callable'")
+
+# Logging and output allocation
 
 def is_logging_enabled():
     """Return whether prediction logging and plot output are enabled."""
     return get_config()["logging"].get("enabled", True)
-
 
 def get_logging_directory():
     """Return the configured logging directory, including date subfolder if enabled."""
@@ -262,7 +331,6 @@ def get_logging_directory():
         today_date = datetime.now().strftime(logging_cfg.get("date_format", "%Y-%m-%d"))
         logging_directory = logging_directory / today_date
     return logging_directory
-
 
 def create_experiment_folder(base_dir, experiment_config):
     """Create and return the next numbered experiment directory beneath ``base_dir``."""
@@ -286,7 +354,6 @@ def create_experiment_folder(base_dir, experiment_config):
         else:
             return experiment_path
 
-
 def next_output_image_path(experiment_path, output_config):
     """Return the next unused annotated-image path in ``experiment_path``."""
     experiment_path = Path(experiment_path)
@@ -308,7 +375,6 @@ def next_output_image_path(experiment_path, output_config):
 
     return experiment_path / f"{prefix}{next_img_num:0{digits}d}{extension}"
 
-
 def get_output_image_path():
     """Return the next annotated-image path for the active prediction runtime."""
     runtime = get_runtime()
@@ -318,83 +384,7 @@ def get_output_image_path():
         runtime.experiment_path,
         get_config()["logging"]["output_image"],
     )
-
-
-def filter_and_sort_detections(detections, class_info):
-    """Filter pixel detections by class threshold and order by capture priority."""
-    filtered_detections = [
-        det for det in detections
-        if det[5] >= class_info[det[0]][1] and class_info[det[0]][2] != -1
-    ]
-
-    return sorted(
-        filtered_detections,
-        key=lambda det: (class_info[det[0]][2], -det[5])
-    )
-
-
-def global_filter_and_sort_detections(all_detections, class_info):
-    """Filter converted target records by class threshold and capture priority."""
-    filtered_detections = [
-        det for det in all_detections
-        if det[3] >= class_info[det[4]][1] and class_info[det[4]][2] != -1
-    ]
-
-    return sorted(
-        filtered_detections,
-        key=lambda det: (class_info[det[4]][2], -det[3])
-    )
-
-
-def plot_image_with_results(image, boxes, class_names, class_info, file_path):
-    """Save an annotated prediction image to ``file_path``."""
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
-
-    plotting_cfg = get_config()["plotting"]
-    bbox_cfg = plotting_cfg["bbox"]
-    label_cfg = plotting_cfg["label"]
-
-    fig, ax = plt.subplots(1)
-    ax.imshow(image, cmap=plotting_cfg.get("cmap", "gray"))
-    ax.axis('off')
-
-    filtered_boxes = filter_and_sort_detections(boxes, class_info)
-
-    for box in filtered_boxes:
-        class_id, x, y, w, h, confidence = box
-        rect = patches.Rectangle(
-            (x, y),
-            w,
-            h,
-            linewidth=bbox_cfg.get("line_width", 1),
-            edgecolor=bbox_cfg.get("edge_color", "red"),
-            facecolor='none',
-        )
-        ax.add_patch(rect)
-
-        label = f"{class_names[class_id]}:{confidence:.2f}"
-        ax.text(
-            x,
-            y,
-            label,
-            color=label_cfg.get("text_color", "white"),
-            fontsize=label_cfg.get("font_size", 8),
-            ha='left',
-            va='bottom',
-            bbox=dict(
-                boxstyle="square,pad=0.1",
-                fc=label_cfg.get("background_color", "black"),
-                ec="none",
-                alpha=label_cfg.get("background_alpha", 0.5),
-            ),
-        )
-
-    plt.savefig(file_path, bbox_inches='tight', pad_inches=0)
-    plt.close(fig)
-
+# Image preprocessing and inference
 
 def preprocess_image(img):
     """Convert a supported 2-D or RGB image to a normalised uint8 image.
@@ -457,7 +447,6 @@ def preprocess_image(img):
 
     return img
 
-
 def split_image(img):
     """Split a 2-D image into configured tiles and return each tile and offset.
 
@@ -500,19 +489,6 @@ def split_image(img):
 
     return split_images
 
-
-def _positive_integer(value, name):
-    if isinstance(value, bool) or not isinstance(value, Real) or int(value) != value or value <= 0:
-        raise ValueError(f"{name} must be a positive integer")
-    return int(value)
-
-
-def _non_negative_integer(value, name):
-    if isinstance(value, bool) or not isinstance(value, Real) or int(value) != value or value < 0:
-        raise ValueError(f"{name} must be a non-negative integer")
-    return int(value)
-
-
 def _tile_offsets(length, tile_size, stride):
     if length <= tile_size:
         return [0]
@@ -521,7 +497,6 @@ def _tile_offsets(length, tile_size, stride):
     if offsets[-1] != last_offset:
         offsets.append(last_offset)
     return offsets
-
 
 def _detection_from_values(values):
     return Detection(
@@ -532,40 +507,6 @@ def _detection_from_values(values):
         height=float(values[4]),
         confidence=float(values[5]),
     )
-
-
-def deduplicate_detections(detections, tolerance_px):
-    """Keep the highest-confidence nearby detection for each class.
-
-    ``detections`` contains ``[class_id, x, y, width, height, confidence]``
-    pixel boxes. Centres within ``tolerance_px`` pixels are duplicates only when
-    their class IDs match.
-    """
-    tolerance_px = _finite_number(tolerance_px, "tiling.deduplication_tolerance_px")
-    if tolerance_px < 0:
-        raise ValueError("tiling.deduplication_tolerance_px must be non-negative")
-
-    ordered = sorted(
-        (_detection_from_values(detection) for detection in detections),
-        key=lambda detection: (
-            detection.class_id,
-            -detection.confidence,
-            detection.centre_y,
-            detection.centre_x,
-        ),
-    )
-    unique = []
-    for detection in ordered:
-        is_duplicate = any(
-            detection.class_id == accepted.class_id
-            and math.hypot(detection.centre_x - accepted.centre_x, detection.centre_y - accepted.centre_y)
-            <= tolerance_px
-            for accepted in unique
-        )
-        if not is_duplicate:
-            unique.append(detection)
-    return [[d.class_id, d.x, d.y, d.width, d.height, d.confidence] for d in unique]
-
 
 def adjust_coordinates(detections, x_offset, y_offset):
     """Convert Ultralytics boxes to source-image pixel records with tile offsets."""
@@ -581,6 +522,11 @@ def adjust_coordinates(detections, x_offset, y_offset):
         detections_adjusted.append(box)
     return detections_adjusted
 
+def ultralytics_results_to_detections(results, x_offset, y_offset):
+    """Convert Ultralytics result objects to pixel detection records."""
+    if len(results[0].boxes.xyxy) == 0:
+        return []
+    return adjust_coordinates(results[0].boxes, x_offset, y_offset)
 
 def run_model_inference(img, conf):
     """Run the configured backend on an RGB image array at a confidence threshold."""
@@ -591,7 +537,6 @@ def run_model_inference(img, conf):
         results = current_model(img, conf=conf)
         return ultralytics_results_to_detections(results, 0, 0)
     raise ValueError(f"Unsupported model backend: {backend}")
-
 
 def run_sahi_inference(img, sahi_config):
     """Run batched SAHI slicing and class-aware IOU merging on one image.
@@ -694,13 +639,110 @@ def run_sahi_inference(img, sahi_config):
         )
     return detections
 
+def deduplicate_detections(detections, tolerance_px):
+    """Keep the highest-confidence nearby detection for each class.
 
-def ultralytics_results_to_detections(results, x_offset, y_offset):
-    """Convert Ultralytics result objects to pixel detection records."""
-    if len(results[0].boxes.xyxy) == 0:
-        return []
-    return adjust_coordinates(results[0].boxes, x_offset, y_offset)
+    ``detections`` contains ``[class_id, x, y, width, height, confidence]``
+    pixel boxes. Centres within ``tolerance_px`` pixels are duplicates only when
+    their class IDs match.
+    """
+    tolerance_px = _finite_number(tolerance_px, "tiling.deduplication_tolerance_px")
+    if tolerance_px < 0:
+        raise ValueError("tiling.deduplication_tolerance_px must be non-negative")
 
+    ordered = sorted(
+        (_detection_from_values(detection) for detection in detections),
+        key=lambda detection: (
+            detection.class_id,
+            -detection.confidence,
+            detection.centre_y,
+            detection.centre_x,
+        ),
+    )
+    unique = []
+    for detection in ordered:
+        is_duplicate = any(
+            detection.class_id == accepted.class_id
+            and math.hypot(detection.centre_x - accepted.centre_x, detection.centre_y - accepted.centre_y)
+            <= tolerance_px
+            for accepted in unique
+        )
+        if not is_duplicate:
+            unique.append(detection)
+    return [[d.class_id, d.x, d.y, d.width, d.height, d.confidence] for d in unique]
+
+def filter_and_sort_detections(detections, class_info):
+    """Filter pixel detections by class threshold and order by capture priority."""
+    filtered_detections = [
+        det for det in detections
+        if det[5] >= class_info[det[0]][1] and class_info[det[0]][2] != -1
+    ]
+
+    return sorted(
+        filtered_detections,
+        key=lambda det: (class_info[det[0]][2], -det[5])
+    )
+
+def global_filter_and_sort_detections(all_detections, class_info):
+    """Filter converted target records by class threshold and capture priority."""
+    filtered_detections = [
+        det for det in all_detections
+        if det[3] >= class_info[det[4]][1] and class_info[det[4]][2] != -1
+    ]
+
+    return sorted(
+        filtered_detections,
+        key=lambda det: (class_info[det[4]][2], -det[3])
+    )
+
+def plot_image_with_results(image, boxes, class_names, class_info, file_path):
+    """Save an annotated prediction image to ``file_path``."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+
+    plotting_cfg = get_config()["plotting"]
+    bbox_cfg = plotting_cfg["bbox"]
+    label_cfg = plotting_cfg["label"]
+
+    fig, ax = plt.subplots(1)
+    ax.imshow(image, cmap=plotting_cfg.get("cmap", "gray"))
+    ax.axis('off')
+
+    filtered_boxes = filter_and_sort_detections(boxes, class_info)
+
+    for box in filtered_boxes:
+        class_id, x, y, w, h, confidence = box
+        rect = patches.Rectangle(
+            (x, y),
+            w,
+            h,
+            linewidth=bbox_cfg.get("line_width", 1),
+            edgecolor=bbox_cfg.get("edge_color", "red"),
+            facecolor='none',
+        )
+        ax.add_patch(rect)
+
+        label = f"{class_names[class_id]}:{confidence:.2f}"
+        ax.text(
+            x,
+            y,
+            label,
+            color=label_cfg.get("text_color", "white"),
+            fontsize=label_cfg.get("font_size", 8),
+            ha='left',
+            va='bottom',
+            bbox=dict(
+                boxstyle="square,pad=0.1",
+                fc=label_cfg.get("background_color", "black"),
+                ec="none",
+                alpha=label_cfg.get("background_alpha", 0.5),
+            ),
+        )
+
+    plt.savefig(file_path, bbox_inches='tight', pad_inches=0)
+    plt.close(fig)
 
 def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=False):
     """Preprocess an image, run inference, and return pixel-space detections.
@@ -774,7 +816,6 @@ def process_image(raw_img, conf=None, save_path=None, class_info=None, plot=Fals
 
     return results
 
-
 def process_image_from_path(image_path, conf=None, save_path=None, class_info=None, plot=False):
     """Read an image path with OpenCV and delegate to :func:`process_image`."""
     import cv2
@@ -786,51 +827,19 @@ def process_image_from_path(image_path, conf=None, save_path=None, class_info=No
     img = cv2.imread(image_path)
     return process_image(img, conf, save_path, class_info, plot)
 
+# Coordinate conversion
 
-def process_single_location(
-    position,
-    image,
-    class_info,
-    *,
-    xy_pixel_spacing_um,
-    z_offset_um,
-    coordinate_mode,
-    coordinate_converter,
-    x_stage_direction,
-    y_stage_direction,
-    legacy_llsm_y_inversion,
-):
-    """Run one overview image and convert its detections to capture targets.
-
-    ``image`` is a ``(height, width)`` overview plane and ``position`` is in
-    micrometres. Returned records are ``[x, y, z, confidence, class_id, name]``
-    in the requested coordinate mode.
-    """
-    height, width = image.shape
-    plot_enabled = get_config()["plotting"].get("enabled", True) and is_logging_enabled()
-    img_path = get_output_image_path() if plot_enabled else None
-    class_names = {key: value[0] for key, value in class_info.items()}
-    results = process_image(image, None, img_path, class_info, plot=plot_enabled)
-    filtered_detections = filter_and_sort_detections(results, class_info)
-
-    return [
-        _convert_detection(
-            position,
-            _detection_from_values(detection),
-            width,
-            height,
-            xy_pixel_spacing_um=xy_pixel_spacing_um,
-            z_offset_um=z_offset_um,
-            coordinate_mode=coordinate_mode,
-            coordinate_converter=coordinate_converter,
-            x_stage_direction=x_stage_direction,
-            y_stage_direction=y_stage_direction,
-            legacy_llsm_y_inversion=legacy_llsm_y_inversion,
-            class_name=class_names[int(detection[0])],
-        )
-        for detection in filtered_detections
-    ]
-
+def _run_coordinate_converter(coordinate_converter, **kwargs):
+    converted = coordinate_converter(**kwargs)
+    try:
+        target_x, target_y, target_z = converted
+    except (TypeError, ValueError) as error:
+        raise ValueError("coordinate_converter must return exactly three values: (x, y, z)") from error
+    return (
+        _finite_number(target_x, "coordinate_converter x output"),
+        _finite_number(target_y, "coordinate_converter y output"),
+        _finite_number(target_z, "coordinate_converter z output"),
+    )
 
 def _convert_detection(
     position,
@@ -877,20 +886,6 @@ def _convert_detection(
         )
     return [target_x, target_y, target_z, detection.confidence, detection.class_id, class_name]
 
-
-def _run_coordinate_converter(coordinate_converter, **kwargs):
-    converted = coordinate_converter(**kwargs)
-    try:
-        target_x, target_y, target_z = converted
-    except (TypeError, ValueError) as error:
-        raise ValueError("coordinate_converter must return exactly three values: (x, y, z)") from error
-    return (
-        _finite_number(target_x, "coordinate_converter x output"),
-        _finite_number(target_y, "coordinate_converter y output"),
-        _finite_number(target_z, "coordinate_converter z output"),
-    )
-
-
 def image_coordinates_to_physical(x, y, im_x, im_y, w, h, new_z, xy_pixel_spacing, z_spacing, x_stage_direction, y_stage_direction, z_stage_direction, LLSM, class_id, conf, class_name):
     """Convert one detected image position to a physical capture target.
 
@@ -914,6 +909,8 @@ def image_coordinates_to_physical(x, y, im_x, im_y, w, h, new_z, xy_pixel_spacin
         class_name=class_name,
     )
 
+image_cordinates_to_physical = image_coordinates_to_physical
+
 
 def merge_close_coordinates(coordinates, tolerance):
     """Merge target records within an XY tolerance in their output coordinate units."""
@@ -927,106 +924,51 @@ def merge_close_coordinates(coordinates, tolerance):
     unique_coords = np.array(unique_coords, dtype=object)
     return unique_coords[:, 0], unique_coords[:, 1], unique_coords[:, 2], list(unique_coords[:, 5])
 
+def process_single_location(
+    position,
+    image,
+    class_info,
+    *,
+    xy_pixel_spacing_um,
+    z_offset_um,
+    coordinate_mode,
+    coordinate_converter,
+    x_stage_direction,
+    y_stage_direction,
+    legacy_llsm_y_inversion,
+):
+    """Run one overview image and convert its detections to capture targets.
 
-def _finite_number(value, name):
-    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value):
-        raise TypeError(f"{name} must be a finite number")
-    return float(value)
+    ``image`` is a ``(height, width)`` overview plane and ``position`` is in
+    micrometres. Returned records are ``[x, y, z, confidence, class_id, name]``
+    in the requested coordinate mode.
+    """
+    height, width = image.shape
+    plot_enabled = get_config()["plotting"].get("enabled", True) and is_logging_enabled()
+    img_path = get_output_image_path() if plot_enabled else None
+    class_names = {key: value[0] for key, value in class_info.items()}
+    results = process_image(image, None, img_path, class_info, plot=plot_enabled)
+    filtered_detections = filter_and_sort_detections(results, class_info)
 
-
-def _positive_number(value, name):
-    numeric_value = _finite_number(value, name)
-    if numeric_value <= 0:
-        raise ValueError(f"{name} must be positive")
-    return numeric_value
-
-
-def _stage_direction(value, name):
-    numeric_value = _finite_number(value, name)
-    if numeric_value not in {-1.0, 1.0}:
-        raise ValueError(f"{name} must be -1 or 1")
-    return int(numeric_value)
-
-
-def _capture_positions(stage_x, stage_y, stage_z):
-    scalar_inputs = [stage_x, stage_y, stage_z]
-    if all(isinstance(value, Real) and not isinstance(value, bool) for value in scalar_inputs):
-        return [
-            CapturePosition(
-                _finite_number(stage_x, "stage_x"),
-                _finite_number(stage_y, "stage_y"),
-                _finite_number(stage_z, "stage_z"),
-            )
-        ]
-
-    try:
-        axes = [np.asarray(axis, dtype=float) for axis in scalar_inputs]
-    except (TypeError, ValueError) as error:
-        raise TypeError("stage_x, stage_y, and stage_z must be numeric scalars or one-dimensional sequences") from error
-    if any(axis.ndim != 1 for axis in axes):
-        raise ValueError("stage_x, stage_y, and stage_z sequences must be one-dimensional")
-    if not axes[0].size or len({axis.size for axis in axes}) != 1:
-        raise ValueError("stage_x, stage_y, and stage_z must be non-empty sequences of equal length")
-    if not all(np.isfinite(axis).all() for axis in axes):
-        raise ValueError("stage coordinates must be finite")
-    return [CapturePosition(float(x), float(y), float(z)) for x, y, z in zip(*axes)]
-
-
-def _validate_image_stack(image, position_count):
-    if not isinstance(image, np.ndarray):
-        raise TypeError("image must be a numpy.ndarray shaped (height, width, position)")
-    if image.ndim != 3:
-        raise ValueError("image must have shape (height, width, position)")
-    if image.shape[0] == 0 or image.shape[1] == 0:
-        raise ValueError("image must have non-empty height and width")
-    if image.shape[2] != position_count:
-        raise ValueError("image position axis must match the number of stage positions")
-
-
-def _resolve_coordinate_mode(coordinate_mode, coordinate_converter):
-    valid_modes = {"pixel", "stage", "callable"}
-    if coordinate_mode not in valid_modes:
-        raise ValueError(f"coordinate_mode must be one of {sorted(valid_modes)}")
-    if coordinate_mode == "callable" and not callable(coordinate_converter):
-        raise TypeError("coordinate_converter must be callable when coordinate_mode is 'callable'")
-    if coordinate_mode != "callable" and coordinate_converter is not None:
-        raise ValueError("coordinate_converter can only be used when coordinate_mode is 'callable'")
-
-
-def _capture_result(positions, results, profile_config):
-    new_x, new_y, new_z, class_list = results
-    count = len(new_x)
-    if count == 0:
-        no_detection = get_config()["no_detection"]
-        mode = no_detection.get("mode", "empty_3i_capture_script")
-        if mode == "end_workflow":
-            return 0, np.array([]), np.array([]), np.array([]), [], [], []
-        if mode == "empty_3i_capture_script":
-            first_position = positions[0]
-            return (
-                1,
-                np.array([first_position.x]),
-                np.array([first_position.y]),
-                np.array([first_position.z]),
-                [no_detection.get("empty_3i_capture_script", "donothing")],
-                ["nothing"],
-                ["nothing"],
-            )
-        raise ValueError(f"Unsupported no_detection mode: {mode}")
-
-    scripts = [profile_config["highres_script"] for _ in range(count)]
-    names = [
-        profile_config["name_template"].format(
-            class_name=class_list[index],
-            x=new_x[index],
-            y=new_y[index],
-            z=new_z[index],
+    return [
+        _convert_detection(
+            position,
+            _detection_from_values(detection),
+            width,
+            height,
+            xy_pixel_spacing_um=xy_pixel_spacing_um,
+            z_offset_um=z_offset_um,
+            coordinate_mode=coordinate_mode,
+            coordinate_converter=coordinate_converter,
+            x_stage_direction=x_stage_direction,
+            y_stage_direction=y_stage_direction,
+            legacy_llsm_y_inversion=legacy_llsm_y_inversion,
+            class_name=class_names[int(detection[0])],
         )
-        for index in range(count)
+        for detection in filtered_detections
     ]
-    comments = [profile_config["highres_comment"] for _ in range(count)]
-    return count, new_x, new_y, new_z, scripts, names, comments
 
+# Montage and capture results
 
 def process_montage(
     positions,
@@ -1088,6 +1030,41 @@ def process_montage(
     new_x, new_y, new_z, class_names = merge_close_coordinates(final_result, tolerance)
     return new_x, new_y, new_z, class_names
 
+def _capture_result(positions, results, profile_config):
+    new_x, new_y, new_z, class_list = results
+    count = len(new_x)
+    if count == 0:
+        no_detection = get_config()["no_detection"]
+        mode = no_detection.get("mode", "empty_3i_capture_script")
+        if mode == "end_workflow":
+            return 0, np.array([]), np.array([]), np.array([]), [], [], []
+        if mode == "empty_3i_capture_script":
+            first_position = positions[0]
+            return (
+                1,
+                np.array([first_position.x]),
+                np.array([first_position.y]),
+                np.array([first_position.z]),
+                [no_detection.get("empty_3i_capture_script", "donothing")],
+                ["nothing"],
+                ["nothing"],
+            )
+        raise ValueError(f"Unsupported no_detection mode: {mode}")
+
+    scripts = [profile_config["highres_script"] for _ in range(count)]
+    names = [
+        profile_config["name_template"].format(
+            class_name=class_list[index],
+            x=new_x[index],
+            y=new_y[index],
+            z=new_z[index],
+        )
+        for index in range(count)
+    ]
+    comments = [profile_config["highres_comment"] for _ in range(count)]
+    return count, new_x, new_y, new_z, scripts, names, comments
+
+# Public prediction APIs
 
 def get_target_locations(
     *,
@@ -1178,7 +1155,6 @@ def get_target_locations(
         legacy_llsm_y_inversion=_legacy_llsm_y_inversion,
     )
     return _capture_result(positions, montage_results, profile_config)
-
 
 def get_target_location(X, Y, Z, image, xy_pixel_spacing, z_spacing, x_stage_direction, y_stage_direction, z_stage_direction, LLSM=False, z_offset=None):
     """Legacy positional wrapper for :func:`get_target_locations`.
