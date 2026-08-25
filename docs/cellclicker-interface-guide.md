@@ -15,8 +15,7 @@ in that folder just to follow the guide: those operations write project output.
 Start the unified interface from the repository root:
 
 ```powershell
-conda activate celfdrive-gpu
-python run_clicker_gui.py
+conda run --name celfdrive-windows python run_clicker_gui.py
 ```
 
 Most controls provide concise hover tooltips after the pointer rests over them

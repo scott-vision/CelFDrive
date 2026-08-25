@@ -55,6 +55,17 @@ Create the GPU-enabled Windows environment from the repository root:
 .\tools\create_windows_conda_env.ps1 -Device gpu
 ```
 
+Run commands without relying on shell activation, for example:
+
+```powershell
+conda run --name celfdrive-windows python -m pytest -q
+```
+
+To use `conda activate celfdrive-windows` instead, run `conda init powershell`
+once, close the current PowerShell window, and open a new one. Confirm that
+`python -c "import sys; print(sys.executable)"` reports the environment path,
+not a system Python installation.
+
 The Windows environments are Conda Forge-only (`conda-forge` and `nodefaults`): their native scientific stack, OpenCV, and PyTorch all come from one solver, avoiding mixed OpenMP DLLs in SlideBook. The GPU file keeps the existing environment name `celfdrive-windows`. For a computer without an NVIDIA GPU, create `Environments/environment-cpu-windows.yml` instead and activate `celfdrive-windows-cpu`. On macOS, use `Environments/environment-gpu-mac.yml`, activate `celfdrive-macos`, then run `python tools/install_sahi.py`.
 
 The GPU environment uses Conda Forge's `pytorch-gpu` package with CUDA 12.8. The creator first resolves the native packages, then installs SAHI with `pip --no-deps` so pip cannot replace Conda Forge Torch or OpenCV. It finishes by running the GPU verification. Select `gpu` as the inference device in the CelFDrive configuration only after that check succeeds.

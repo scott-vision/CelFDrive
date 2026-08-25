@@ -36,4 +36,5 @@ if ($LASTEXITCODE -ne 0) {
     throw "CelFDrive runtime verification failed for '$environmentName'."
 }
 
-Write-Host "Environment '$environmentName' is ready. Activate with: conda activate $environmentName"
+Write-Host "Environment '$environmentName' is ready. Run commands with: conda run --name $environmentName python <command>"
+Write-Host "For `conda activate`, run `conda init powershell` once and open a new PowerShell window before activating $environmentName."
