@@ -28,6 +28,7 @@ tests, the configuration editor, the annotation GUIs - works normally.
 | Command | Downloads | Needed for |
 | --- | --- | --- |
 | `git lfs pull --include="Models/yolo11x_p99p99_bg05/**"` | 114 MB | running prediction, `examples/run_smoke_test.py`, the SlideBook workflow |
+| `git lfs pull --include="benchmarks/data/cellclicker/cellcognition_h2b_P0037/**"` | 162 MB | reproducing the CellCognition P0037 exported-label benchmark |
 | `git lfs pull --include="examples/**"` | 108 MB | the max-projection SAHI notebook |
 | `git lfs pull --include="SlideBook/**"` | 29 MB | opening the example SlideBook experiment |
 | `git lfs pull --include="Models/yolo11x_p99p99_bg05_noaug_v1/**"` | 229 MB | the no-augmentation ablation checkpoint only |

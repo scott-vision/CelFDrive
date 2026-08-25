@@ -74,3 +74,21 @@ python -m benchmarks.run_benchmark inventory-cellcognition --images-root D:\CelF
 
 Those inventory commands do not represent the public data as six-stage ground
 truth; they are provenance and pipeline checks only.
+
+## Versioned CellClicker reproduction data
+
+The complete normalized image sequence and exported YOLO labels for the
+CellCognition H2B P0037 CellClicker project are versioned at
+`benchmarks/data/cellclicker/cellcognition_h2b_P0037/`. The 206 PNG images are
+Git LFS objects, so a code-only clone must fetch them explicitly:
+
+```powershell
+git lfs pull --include="benchmarks/data/cellclicker/cellcognition_h2b_P0037/**"
+python -m benchmarks.evaluate_cellclicker_exported_fullframe --project-directory benchmarks/data/cellclicker/cellcognition_h2b_P0037 --raw-images-directory benchmarks/data/cellclicker/cellcognition_h2b_P0037/images --output-root tmp/benchmark-runs
+```
+
+This command evaluates the bundled checkpoint against the exact exported
+labels and images in the repository. It writes derived outputs below the
+gitignored `tmp/benchmark-runs/` directory and does not alter the fixture.
+If the images have not been fetched, the command identifies the Git LFS
+pointer and gives the required retrieval command.

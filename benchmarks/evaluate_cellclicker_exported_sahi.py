@@ -4,14 +4,27 @@ import json
 import re
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from PIL import Image
 
 from .core import _sha256, box_iou, create_run_directory, detection_metrics
+from .fixture_paths import resolve_exported_image_path
 from .run_cellcognition_full_label_sahi_benchmark import batched_sahi_prediction_table
 from .run_cellcognition_target_benchmark import MODEL_PATH
 
 CLASSES = ["prophase", "earlyprometaphase", "prometaphase", "metaphase", "anaphase", "telophase"]
 BACKGROUND = "background / missed"
+
+
+def read_exported_image(image_path):
+    """Read a PNG benchmark fixture or a legacy TIFF image into an array."""
+    image_path = Path(image_path)
+    if image_path.suffix.lower() == ".png":
+        return np.asarray(Image.open(image_path))
+    import tifffile
+
+    return tifffile.imread(image_path)
 
 
 def load_exported_labels(project_directory, raw_images_directory):
@@ -24,9 +37,7 @@ def load_exported_labels(project_directory, raw_images_directory):
         if match is None:
             continue
         position, frame = match.group("position"), int(match.group("frame"))
-        raw_path = raw_images_directory / position / f"tubulin_P{position}_T{frame:05}_Crfp_Z1_S1.tif"
-        if not raw_path.is_file():
-            raise FileNotFoundError(raw_path)
+        raw_path = resolve_exported_image_path(raw_images_directory, label_path, position, frame)
         for object_index, line in enumerate(label_path.read_text(encoding="utf-8").splitlines()):
             values = line.split()
             if len(values) != 5:

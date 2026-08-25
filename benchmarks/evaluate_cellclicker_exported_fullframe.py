@@ -12,6 +12,7 @@ from .evaluate_cellclicker_exported_sahi import (
     load_exported_labels,
     match_any_class,
     precision_recall_table,
+    read_exported_image,
     write_matrix_png,
     write_precision_recall_png,
 )
@@ -20,13 +21,11 @@ from .run_cellcognition_target_benchmark import MODEL_PATH
 
 def full_frame_predictions(labels, model, confidence, batch_size, device):
     """Run normalized full fields in GPU batches without image slicing."""
-    import tifffile
-
     rows = []
     fields = list(labels.groupby("image_id", sort=True))
     for start in range(0, len(fields), batch_size):
         batch = fields[start:start + batch_size]
-        images = [prepare_model_input(preprocess_image(tifffile.imread(group.resolved_image_path.iloc[0])), 3) for _, group in batch]
+        images = [prepare_model_input(preprocess_image(read_exported_image(group.resolved_image_path.iloc[0])), 3) for _, group in batch]
         results = model.predict(images, imgsz=640, conf=confidence, device=device, batch=len(batch), verbose=False)
         for (image_id, group), result in zip(batch, results):
             if result.boxes is None:

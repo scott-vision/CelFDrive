@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .core import _sha256, box_iou, create_run_directory, prepare_model_input, preprocess_image, write_quality_overlays
@@ -17,7 +18,6 @@ from .run_cellcognition_target_benchmark import MODEL_PATH, PREDICTION_MAP, SOUR
 
 def batched_sahi_prediction_table(labels, detection_model, slice_height, slice_width, overlap_ratio, tile_batch_size, postprocess_metric="IOS", postprocess_threshold=.5):
     """Slice with SAHI, infer batches of tiles on GPU, then merge with SAHI NMM."""
-    import tifffile
     from sahi.postprocess.combine import GreedyNMMPostprocess
     from sahi.prediction import ObjectPrediction
     from sahi.slicing import slice_image
@@ -27,7 +27,16 @@ def batched_sahi_prediction_table(labels, detection_model, slice_height, slice_w
     rows = []
     postprocess = GreedyNMMPostprocess(match_threshold=postprocess_threshold, match_metric=postprocess_metric, class_agnostic=False)
     for image_id, image_labels in labels.groupby("image_id", sort=True):
-        image = prepare_model_input(preprocess_image(tifffile.imread(image_labels.resolved_image_path.iloc[0])), 3)
+        image_path = Path(image_labels.resolved_image_path.iloc[0])
+        if image_path.suffix.lower() == ".png":
+            from PIL import Image
+
+            image_array = np.asarray(Image.open(image_path))
+        else:
+            import tifffile
+
+            image_array = tifffile.imread(image_path)
+        image = prepare_model_input(preprocess_image(image_array), 3)
         slices = slice_image(image, slice_height=slice_height, slice_width=slice_width, overlap_height_ratio=overlap_ratio, overlap_width_ratio=overlap_ratio, auto_slice_resolution=False)
         objects = []
         for start in range(0, len(slices), tile_batch_size):
