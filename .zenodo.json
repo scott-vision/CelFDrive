@@ -1,0 +1,106 @@
+{
+  "title": "CelFDrive: Multimodal deep learning-assisted microscopy for automated detection of rare events",
+  "upload_type": "software",
+  "version": "1.0.0",
+  "license": "other-nc",
+  "description": "<p>CelFDrive is a deep-learning-assisted workflow for automated microscopy. It detects configured cell states in overview images, then returns stage coordinates and capture metadata for a high-resolution workflow. The bundled detector is a fine-tuned YOLO11x object-detection model.</p><p>The current 3i-oriented SlideBook workflow has been deployed on lattice light-sheet (LLSM) and spinning-disk confocal (SDC) systems. CelFDrive can be adapted to control software that exchanges images and target coordinates with Python; each adaptation requires microscope-specific coordinate, capture-command, objective-offset, and hardware-safety validation. The repository also provides CellClicker annotation and training tools.</p><p>The detection model was trained on live-cell SiR-DNA-labelled human RPE-1 microscopy annotated for six mitotic stages. The associated training dataset is referenced as EMBL-EBI BioImage Archive accession S-BIAD3980 (DOI 10.6019/S-BIAD3980).</p>",
+  "language": "eng",
+  "access_right": "open",
+  "creators": [
+    {
+      "name": "Brooks, Scott",
+      "affiliation": "Warwick Biomedical Sciences, Warwick Medical School, University of Warwick, Coventry, UK",
+      "orcid": "0009-0002-4748-7293"
+    },
+    {
+      "name": "Toral-Pérez, Sara",
+      "affiliation": "Centre for Mechanochemical Cell Biology, University of Warwick, Coventry, UK",
+      "orcid": "0000-0003-4309-9891"
+    },
+    {
+      "name": "Pučeková, Nina",
+      "affiliation": "Centre for Mechanochemical Cell Biology, University of Warwick, Coventry, UK",
+      "orcid": "0009-0007-9994-9556"
+    },
+    {
+      "name": "Corcoran, David S.",
+      "affiliation": "Centre for Mechanochemical Cell Biology, University of Warwick, Coventry, UK",
+      "orcid": "0000-0001-5453-0646"
+    },
+    {
+      "name": "Kilborn, Karl",
+      "affiliation": "Intelligent Imaging Innovations, Denver, Colorado, USA"
+    },
+    {
+      "name": "Bodensteiner, Brian",
+      "affiliation": "Intelligent Imaging Innovations, Denver, Colorado, USA"
+    },
+    {
+      "name": "Baumann, Hella",
+      "affiliation": "Intelligent Imaging Innovations, London, UK"
+    },
+    {
+      "name": "Burroughs, Nigel J.",
+      "affiliation": "Zeeman Institute (SBIDER), Mathematics Institute, University of Warwick, Coventry, UK",
+      "orcid": "0000-0002-4632-1550"
+    },
+    {
+      "name": "McAinsh, Andrew D.",
+      "affiliation": "Centre for Mechanochemical Cell Biology and Warwick Biomedical Sciences, Warwick Medical School, University of Warwick, Coventry, UK",
+      "orcid": "0000-0001-6808-0711"
+    },
+    {
+      "name": "Bretschneider, Till",
+      "affiliation": "Department of Computer Science, University of Warwick, Coventry, UK",
+      "orcid": "0000-0002-5317-603X"
+    }
+  ],
+  "keywords": [
+    "smart microscopy",
+    "adaptive microscopy",
+    "automated image acquisition",
+    "object detection",
+    "deep learning",
+    "YOLO",
+    "mitosis",
+    "mitotic stage classification",
+    "live-cell imaging",
+    "lattice light-sheet microscopy",
+    "spinning disk confocal microscopy",
+    "fluorescence microscopy",
+    "rare event detection",
+    "microscope automation",
+    "bioimage analysis"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "10.6019/S-BIAD3980",
+      "relation": "references",
+      "resource_type": "dataset",
+      "scheme": "doi"
+    },
+    {
+      "identifier": "https://github.com/scott-vision/CelFDrive",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ],
+  "grants": [
+    {
+      "id": "10.13039/501100000265::MR/R015910/1"
+    },
+    {
+      "id": "10.13039/501100000265::MR/W007053/1"
+    },
+    {
+      "id": "10.13039/501100000266::EP/V062522/1"
+    },
+    {
+      "id": "10.13039/100010269::226605/Z/22/Z"
+    },
+    {
+      "id": "10.13039/100010269::208384/Z/17/Z"
+    }
+  ],
+  "notes": "Licence: Warwick CelFDrive licence (c) 2024 The University of Warwick — a bespoke, non-commercial licence with no SPDX identifier. Use is subject to the terms in LICENSE.md in the repository. Commercial enquiries: Warwick Innovations, ventures@warwick.ac.uk, quoting reference 'Warwick CelFDrive'. Third-party terms: the bundled detector checkpoints in Models/ were fine-tuned with Ultralytics training code and therefore carry Ultralytics' AGPL-3.0 terms; CelFDrive imports Ultralytics at run time and does not redistribute any Ultralytics source code. The full dependency and checkpoint licence record is in THIRD_PARTY_LICENCES.md in the repository. Funding: MRC iCASE Studentship MR/R015910/1 (project ref 2430216); MRC Core Studentship MR/W007053/1 (project ref 2881331); EPSRC EP/V062522/1; Wellcome Discovery Award 226605/Z/22/Z; Wellcome Multi-user Equipment Grant 208384/Z/17/Z."
+}

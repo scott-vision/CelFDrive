@@ -1,3 +1,9 @@
+# Version policy: libraries whose behaviour the detector depends on carry an
+# upper bound at the next major release so that a future solve cannot silently
+# cross a breaking version. The exact `==` pins below were added to resolve
+# specific solver or runtime conflicts and should not be relaxed without
+# re-running tools/verify_slidebook_runtime.py. For byte-exact reproduction of
+# a working machine, export a lock file with tools/export_environment_lock.ps1.
 name: celfdrive-windows
 channels:
   - conda-forge
@@ -11,21 +17,21 @@ dependencies:
   # CUDA 12.8 is supported by current Windows NVIDIA production drivers. Do
   # not let the solver select CUDA 13 unless the acquisition driver is updated.
   - cuda-version=12.8
-  - pytorch-gpu
-  - torchvision
-  - torchaudio
-  - ultralytics
-  - opencv
-  - numpy
-  - scipy
-  - pandas
+  - pytorch-gpu<3
+  - torchvision<1
+  - torchaudio<3
+  - ultralytics<9
+  - opencv<5
+  - numpy<3
+  - scipy<2
+  - pandas<3
   - h5py
-  - matplotlib
-  - scikit-image
+  - matplotlib<4
+  - scikit-image<1
   - pillow
   - seaborn
   - tqdm
-  - pyyaml
+  - pyyaml<7
   - pytest
   - dill=0.3.8
   - networkx=3.2.1

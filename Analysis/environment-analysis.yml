@@ -1,0 +1,33 @@
+# Standalone environment for the NDC80/NUP107 recruitment analysis in this
+# folder. It is deliberately separate from the CelFDrive acquisition
+# environments in ../Environments: this analysis needs CuPy and does not need
+# Torch, Ultralytics, or SAHI. Do not merge the two.
+#
+#   conda env create --file Analysis/environment-analysis.yml
+#   conda activate celfdrive-analysis
+#
+# find_filtered_spots_batch.py requires an NVIDIA GPU with a CUDA 12 driver.
+# The other three scripts are CPU-only.
+#
+# Upper bounds are set at the next major version of each library so that a
+# future solve cannot silently cross a breaking release. To reproduce an exact
+# environment rather than a compatible one, export a lock file from a working
+# machine with tools/export_environment_lock.ps1.
+name: celfdrive-analysis
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pip
+  # GPU spot detection (find_filtered_spots_batch.py only).
+  - cuda-version=12.8
+  - cupy<15
+  # Numerical and image handling.
+  - numpy<3
+  - scipy<2
+  - scikit-image<1
+  - tifffile
+  - pandas<3
+  - matplotlib<4
+  - pyyaml<7

@@ -23,6 +23,11 @@ Models/yolo11x_p99p99_bg05/*
 !Models/yolo11x_p99p99_bg05/weights/
 Models/yolo11x_p99p99_bg05/weights/*
 !Models/yolo11x_p99p99_bg05/weights/best.pt
+Models/yolo11x_p99p99_bg05_noaug_v1/*
+!Models/yolo11x_p99p99_bg05_noaug_v1/weights/
+Models/yolo11x_p99p99_bg05_noaug_v1/weights/*
+!Models/yolo11x_p99p99_bg05_noaug_v1/weights/best.pt
+!Models/yolo11x_p99p99_bg05_noaug_v1/weights/last.pt
 runs/
 yolo11n.pt
 

@@ -1,3 +1,9 @@
+# Version policy: libraries whose behaviour the detector depends on carry an
+# upper bound at the next major release so that a future solve cannot silently
+# cross a breaking version. The exact `==` pins below were added to resolve
+# specific solver or runtime conflicts and should not be relaxed without
+# re-running tools/verify_slidebook_runtime.py. For byte-exact reproduction of
+# a working machine, export a lock file with tools/export_environment_lock.ps1.
 name: celfdrive-macos
 channels:
   - conda-forge
@@ -7,21 +13,21 @@ dependencies:
   # tools/install_sahi.py so pip cannot replace Torch or OpenCV.
   - python=3.11
   - pip
-  - pytorch
-  - torchvision
-  - torchaudio
-  - ultralytics
-  - opencv
-  - numpy
-  - scipy
-  - pandas
+  - pytorch<3
+  - torchvision<1
+  - torchaudio<3
+  - ultralytics<9
+  - opencv<5
+  - numpy<3
+  - scipy<2
+  - pandas<3
   - h5py
-  - matplotlib
-  - scikit-image
+  - matplotlib<4
+  - scikit-image<1
   - pillow
   - seaborn
   - tqdm
-  - pyyaml
+  - pyyaml<7
   - pytest
   - dill=0.3.8
   - networkx=3.2.1

@@ -4,6 +4,48 @@ CelFDrive is a deep-learning-assisted workflow for automated microscopy. It dete
 
 This repository currently supports local development on Windows and macOS with Python 3.11. The bundled sample is an installation smoke test; it is not a biological benchmark or evidence of model generalisation.
 
+## Getting the code and data
+
+The code is small. The large files - the detector weights, the tutorial TIFFs,
+and the example SlideBook experiment - are stored with Git LFS and are
+downloaded only when you ask for them. Install Git LFS once per machine with
+`git lfs install` before cloning.
+
+**Code only** (~11 MB, a few seconds). Use this if you want to read the source,
+review it, or work on it:
+
+```powershell
+$env:GIT_LFS_SKIP_SMUDGE = 1
+git clone https://github.com/scott-vision/CelFDrive.git
+Remove-Item Env:\GIT_LFS_SKIP_SMUDGE
+```
+
+The large files are present as small text pointer files. Everything else - the
+tests, the configuration editor, the annotation GUIs - works normally.
+
+**Then add only what you need**, from inside the clone:
+
+| Command | Downloads | Needed for |
+| --- | --- | --- |
+| `git lfs pull --include="Models/yolo11x_p99p99_bg05/**"` | 114 MB | running prediction, `examples/run_sample_workflow.py`, the SlideBook workflow |
+| `git lfs pull --include="examples/**"` | 108 MB | the max-projection SAHI notebook |
+| `git lfs pull --include="SlideBook/**"` | 29 MB | opening the example SlideBook experiment |
+| `git lfs pull --include="Models/yolo11x_p99p99_bg05_noaug_v1/**"` | 229 MB | the no-augmentation ablation checkpoint only |
+| `git lfs pull` | 480 MB | everything |
+
+**Everything at once**: a plain `git clone` with no environment variable
+downloads the code and all 480 MB of large files.
+
+**Without git**: download the versioned release archive from the Zenodo DOI. It
+is a single zip containing the code and every large file, and needs neither git
+nor Git LFS. This is the recommended route for reviewers and for citing a
+specific version.
+
+If Git LFS is not installed, or a `git lfs pull` has not been run, the detector
+weights stay as a pointer file. `python -m pytest -q` and
+`python examples/run_sample_workflow.py` both report this explicitly rather
+than failing obscurely.
+
 ## Install
 
 Create the GPU-enabled Windows environment from the repository root:
@@ -24,6 +66,13 @@ remove it first and recreate it from the environment file rather than
 installing packages into the old one.
 Do not set `KMP_DUPLICATE_LIB_OK=TRUE` as a production workaround: it merely
 suppresses the runtime safety check and can leave acquisition Python unstable.
+
+The environment files describe a *compatible* environment, not an exact one:
+libraries the detector depends on carry an upper bound at the next major
+release, and a few packages carry exact pins that resolved specific solver or
+runtime conflicts. To archive an exact environment, run
+`.\tools\export_environment_lock.ps1 -Name celfdrive-windows` on a machine where
+the environment works and commit the resulting lock file.
 
 ## Quick start and local verification
 
@@ -186,11 +235,41 @@ Benchmark, evaluation, and report scripts are organised as modules in
 frozen benchmark commands. Dataset-preparation utilities are likewise in
 `tools` and are invoked with `python -m tools.<module>`.
 
+## Recruitment analysis scripts
+
+`Analysis` holds a standalone NDC80/NUP107 recruitment pipeline used for the
+paper figures. It is not part of the acquisition workflow, nothing in CelFDrive
+imports it, it needs its own CuPy environment, and it is not covered by the test
+suite. See [`Analysis/README.md`](Analysis/README.md) for its inputs, parameters,
+and the order in which to run the four steps.
+
 ## Microscope integration and limitations
 
 CelFDrive's current 3i-oriented SlideBook workflow invokes Python directly through SlideBook's Python hierarchical-capture support; it does not require MATLAB. The supplied bridge accepts a raw montage, converts SlideBook's image-axis order, and returns capture targets. Follow the [SlideBook direct-Python setup guide](docs/slidebook-capture-script.md), including registration of the Conda environment in SlideBook and microscope-specific objective-offset validation. Adaptations to other systems must provide their own coordinate convention, capture command integration, and hardware safety checks.
 
 Only the bundled Ultralytics YOLO workflow is supported and covered by the smoke test.
+
+## Licence
+
+CelFDrive is distributed under the terms in [`LICENSE.md`](LICENSE.md): a
+bespoke University of Warwick licence for non-commercial use. Commercial
+enquiries go to Warwick Innovations (ventures@warwick.ac.uk, reference "Warwick
+CelFDrive").
+
+[`THIRD_PARTY_LICENCES.md`](THIRD_PARTY_LICENCES.md) records the licences of the
+software CelFDrive depends on and of the bundled detector checkpoints, which
+were fine-tuned with Ultralytics training code and carry Ultralytics'
+AGPL-3.0 terms. Read it before redistributing CelFDrive or any model trained
+with it.
+
+## Citing CelFDrive
+
+Please cite the versioned Zenodo release of CelFDrive that you used. The
+repository's [`CITATION.cff`](CITATION.cff) supplies machine-readable software
+citation metadata; [`.zenodo.json`](.zenodo.json) supplies the corresponding
+Zenodo release metadata, including creators, funding, and the related training
+dataset. The associated journal article will be added to the citation metadata
+after publication.
 
 ## Developer checklist
 

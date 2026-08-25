@@ -1,0 +1,110 @@
+cff-version: 1.2.0
+title: CelFDrive
+message: >-
+  If you use this software, please cite the versioned Zenodo release. The
+  associated journal article will be added when it is published.
+type: software
+version: 1.0.0
+date-released: '2026-08-25'
+abstract: >-
+  CelFDrive is software for automated detection of rare cellular events that
+  drives high-resolution 3D microscopy acquisition. It integrates deep-learning
+  cell classification from auxiliary low-magnification fluorescence images,
+  detecting cells of interest with a fine-tuned YOLO11x object-detection model
+  and automatically steering the microscope to image them at high resolution.
+  It has been deployed on lattice light-sheet and spinning-disk confocal
+  systems. Adapting CelFDrive to another microscope-control system requires
+  microscope-specific coordinate, capture-command, and hardware-safety
+  validation.
+
+authors:
+  - given-names: Scott
+    family-names: Brooks
+    orcid: 'https://orcid.org/0009-0002-4748-7293'
+    email: scott.brooks.1@warwick.ac.uk
+    affiliation: >-
+      Warwick Biomedical Sciences, Warwick Medical School, University of
+      Warwick, Coventry, UK
+  - given-names: Sara
+    family-names: Toral-Pérez
+    orcid: 'https://orcid.org/0000-0003-4309-9891'
+    affiliation: >-
+      Centre for Mechanochemical Cell Biology, University of Warwick,
+      Coventry, UK
+  - given-names: Nina
+    family-names: Pučeková
+    orcid: 'https://orcid.org/0009-0007-9994-9556'
+    affiliation: >-
+      Centre for Mechanochemical Cell Biology, University of Warwick,
+      Coventry, UK
+  - given-names: David S.
+    family-names: Corcoran
+    orcid: 'https://orcid.org/0000-0001-5453-0646'
+    affiliation: >-
+      Centre for Mechanochemical Cell Biology, University of Warwick,
+      Coventry, UK
+  - given-names: Karl
+    family-names: Kilborn
+    affiliation: 'Intelligent Imaging Innovations, Denver, Colorado, USA'
+  - given-names: Brian
+    family-names: Bodensteiner
+    affiliation: 'Intelligent Imaging Innovations, Denver, Colorado, USA'
+  - given-names: Hella
+    family-names: Baumann
+    affiliation: 'Intelligent Imaging Innovations, London, UK'
+  - given-names: Nigel J.
+    family-names: Burroughs
+    orcid: 'https://orcid.org/0000-0002-4632-1550'
+    affiliation: >-
+      Zeeman Institute (SBIDER), Mathematics Institute, University of Warwick,
+      Coventry, UK
+  - given-names: Andrew D.
+    family-names: McAinsh
+    orcid: 'https://orcid.org/0000-0001-6808-0711'
+    affiliation: >-
+      Centre for Mechanochemical Cell Biology and Warwick Biomedical Sciences,
+      Warwick Medical School, University of Warwick, Coventry, UK
+  - given-names: Till
+    family-names: Bretschneider
+    orcid: 'https://orcid.org/0000-0002-5317-603X'
+    affiliation: >-
+      Department of Computer Science, University of Warwick, Coventry, UK
+
+repository-code: 'https://github.com/scott-vision/CelFDrive'
+url: 'https://github.com/scott-vision/CelFDrive'
+
+# The University of Warwick CelFDrive licence is a bespoke non-commercial
+# licence with no SPDX identifier, so `license:` is deliberately omitted and
+# `license-url` points at the licence text instead. Do NOT substitute an SPDX
+# id such as MIT or CC-BY-NC-4.0 -- they are not equivalent.
+license-url: 'https://github.com/scott-vision/CelFDrive/blob/main/LICENSE.md'
+
+keywords:
+  - smart microscopy
+  - adaptive microscopy
+  - automated image acquisition
+  - object detection
+  - deep learning
+  - YOLO
+  - mitosis
+  - mitotic stage classification
+  - live-cell imaging
+  - lattice light-sheet microscopy
+  - spinning disk confocal microscopy
+  - fluorescence microscopy
+  - rare event detection
+  - microscope automation
+  - bioimage analysis
+
+references:
+  - type: data
+    title: >-
+      CelFDrive: Multimodal fluorescence microscopy dataset of mitotic stages in
+      human RPE-1 cells (SiR-DNA) with expert bounding-box annotations for
+      deep-learning object detection
+    doi: 10.6019/S-BIAD3980
+    year: 2026
+    authors:
+      - given-names: Scott
+        family-names: Brooks
+        orcid: 'https://orcid.org/0009-0002-4748-7293'
