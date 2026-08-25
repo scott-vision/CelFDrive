@@ -19,14 +19,26 @@ Lock files are platform-specific. Export one per platform you support.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [string]$Name
+    [string]$Name,
+
+    [string]$CondaExecutable
 )
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $lockPath = Join-Path $repositoryRoot "Environments\$Name.lock.txt"
 
-& conda list --explicit --md5 --name $Name | Set-Content -Path $lockPath -Encoding utf8
+$condaPath = $CondaExecutable
+if ([string]::IsNullOrWhiteSpace($condaPath)) {
+    $condaApplication = @(Get-Command conda.exe -CommandType Application -ErrorAction SilentlyContinue)[0]
+    if ($null -ne $condaApplication) {
+        $condaPath = $condaApplication.Source
+    }
+}
+if ([string]::IsNullOrWhiteSpace($condaPath) -or -not (Test-Path -LiteralPath $condaPath)) {
+    throw "Conda executable was not found. Pass -CondaExecutable with the full path to conda.exe."
+}
+& $condaPath list --explicit --md5 --name $Name | Set-Content -Path $lockPath -Encoding utf8
 if ($LASTEXITCODE -ne 0) {
     throw "Conda could not list packages for '$Name'. Create the environment first."
 }

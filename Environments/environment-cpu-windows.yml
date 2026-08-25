@@ -22,7 +22,8 @@ dependencies:
   - pandas<3
   - h5py
   - matplotlib<4
-  - scikit-image<1
+  # 0.26.0 includes pip-vendored bytecode that conflicts with pip on Windows.
+  - scikit-image<0.26
   - pillow
   - seaborn
   - tqdm
