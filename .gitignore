@@ -47,6 +47,5 @@ paperinfo/
 # Private manuscript source files
 Paper Resource/
 
-# Local repository guidance
-AGENTS.md
-/Logging
+# Local generated logs
+/Logging/
