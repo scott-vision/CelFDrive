@@ -2,7 +2,7 @@
 
 CelFDrive is a deep-learning-assisted workflow for automated microscopy. It detects configured cell states in overview images and returns stage coordinates and capture metadata for a high-resolution workflow.
 
-This repository currently supports local development on Windows and macOS with Python 3.11. The bundled sample is an installation smoke test; it is not a biological benchmark or evidence of model generalisation.
+This repository currently supports local development on Windows and macOS with Python 3.11. The bundled synthetic fixture is an installation smoke test; it is not a biological benchmark or evidence of model generalisation.
 
 ## Getting the code and data
 
@@ -27,7 +27,7 @@ tests, the configuration editor, the annotation GUIs - works normally.
 
 | Command | Downloads | Needed for |
 | --- | --- | --- |
-| `git lfs pull --include="Models/yolo11x_p99p99_bg05/**"` | 114 MB | running prediction, `examples/run_sample_workflow.py`, the SlideBook workflow |
+| `git lfs pull --include="Models/yolo11x_p99p99_bg05/**"` | 114 MB | running prediction, `examples/run_smoke_test.py`, the SlideBook workflow |
 | `git lfs pull --include="examples/**"` | 108 MB | the max-projection SAHI notebook |
 | `git lfs pull --include="SlideBook/**"` | 29 MB | opening the example SlideBook experiment |
 | `git lfs pull --include="Models/yolo11x_p99p99_bg05_noaug_v1/**"` | 229 MB | the no-augmentation ablation checkpoint only |
@@ -43,7 +43,7 @@ specific version.
 
 If Git LFS is not installed, or a `git lfs pull` has not been run, the detector
 weights stay as a pointer file. `python -m pytest -q` and
-`python examples/run_sample_workflow.py` both report this explicitly rather
+`python examples/run_smoke_test.py` both report this explicitly rather
 than failing obscurely.
 
 ## Install
@@ -80,13 +80,13 @@ From the repository root, run:
 
 ```powershell
 python -m pytest -q
-python examples/run_sample_workflow.py
+python examples/run_smoke_test.py
 python tools/verify_slidebook_runtime.py --device cpu
 ```
 
-The test suite requires no microscope hardware or downloads. The sample command loads `sample_data/synthetic_blank_image.csv`, runs the bundled model, prints JSON detections, and exits successfully only when they match `sample_data/expected_detections.json`.
+The test suite requires no microscope hardware or downloads. The smoke-test command loads `tests/fixtures/synthetic_smoke_test/synthetic_blank_image.csv`, runs the bundled model, prints JSON detections, and exits successfully only when they match `tests/fixtures/synthetic_smoke_test/expected_detections.json`.
 
-The blank sample is deliberately synthetic because an approved redistributable microscopy subset is not yet included. See [sample_data/README.md](sample_data/README.md) before treating it as anything other than an installation check.
+The blank fixture is deliberately synthetic because an approved redistributable microscopy subset is not yet included. See [the fixture documentation](tests/fixtures/synthetic_smoke_test/README.md) before treating it as anything other than an installation check.
 
 `tools/verify_slidebook_runtime.py` is the Windows/SlideBook environment smoke
 test. It imports the inference libraries in the order used by a SlideBook
@@ -216,18 +216,6 @@ SAM2 box generation, YOLO/COCO/miniseries export, and optional YOLO training.
 See the [CellClicker user guide](docs/cellclicker-interface-guide.md) for the
 required project layout, tracking XML semantics, and hardware requirements.
 
-The scripts below are retained for legacy workflows:
-
-CellClicker and CellSelector create YOLO-compatible labels from time-series data:
-
-```powershell
-python -m CellClicker.legacy.run_clicker
-python -m CellClicker.legacy.run_selector
-python -m CellClicker.legacy.run_conversion
-```
-
-Set the phase names in `CellClicker/legacy/run_selector.py` and the dataset/user values in `CellClicker/legacy/run_conversion.py` for the experiment. CellSelector opens an interactive GUI, so its selection workflow must be checked manually. The entry point now forwards the configured phase list correctly.
-
 `train.py` is the configuration-driven YOLO training entry point. Pass a schema-versioned YAML file with `--config`, using `examples/yolo_training.example.yaml` as the starting template; `--name` can override only the run name for one invocation. The command-line and GUI entry points share the same validation, dataset preparation, training and held-out-test evaluation workflow.
 
 Benchmark, evaluation, and report scripts are organised as modules in
@@ -252,9 +240,7 @@ Only the bundled Ultralytics YOLO workflow is supported and covered by the smoke
 ## Licence
 
 CelFDrive is distributed under the terms in [`LICENSE.md`](LICENSE.md): a
-bespoke University of Warwick licence for non-commercial use. Commercial
-enquiries go to Warwick Innovations (ventures@warwick.ac.uk, reference "Warwick
-CelFDrive").
+bespoke University of Warwick licence for non-commercial use.
 
 [`THIRD_PARTY_LICENCES.md`](THIRD_PARTY_LICENCES.md) records the licences of the
 software CelFDrive depends on and of the bundled detector checkpoints, which
@@ -277,5 +263,5 @@ Before sharing a change:
 
 1. Create the documented Conda environment on the target platform.
 2. Run `python -m pytest -q`.
-3. Run `python examples/run_sample_workflow.py`.
+3. Run `python examples/run_smoke_test.py`.
 4. Confirm configuration examples, expected output, and README commands still agree with the changed behavior.

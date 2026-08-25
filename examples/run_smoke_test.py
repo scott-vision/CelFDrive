@@ -15,7 +15,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 import predict
 
 
-SAMPLE_DIRECTORY = REPOSITORY_ROOT / "sample_data"
+FIXTURE_DIRECTORY = REPOSITORY_ROOT / "tests" / "fixtures" / "synthetic_smoke_test"
 
 
 def serialise_detections(detections):
@@ -61,7 +61,7 @@ def main():
     parser.add_argument(
         "--image",
         type=Path,
-        default=SAMPLE_DIRECTORY / "synthetic_blank_image.csv",
+        default=FIXTURE_DIRECTORY / "synthetic_blank_image.csv",
         help="Single-channel CSV image to process.",
     )
     args = parser.parse_args()
@@ -76,7 +76,7 @@ def main():
     predict.configure_prediction_runtime(config)
 
     image = np.loadtxt(args.image, delimiter=",", dtype=np.uint8)
-    with open(SAMPLE_DIRECTORY / "expected_detections.json", encoding="utf-8") as expected_file:
+    with open(FIXTURE_DIRECTORY / "expected_detections.json", encoding="utf-8") as expected_file:
         expected = json.load(expected_file)
 
     class_info = predict.get_class_info(config["profile"])
@@ -84,7 +84,7 @@ def main():
     print(json.dumps(serialise_detections(detections), indent=2))
 
     if not matches_expected(detections, expected):
-        raise SystemExit("Sample output does not match sample_data/expected_detections.json")
+        raise SystemExit("Smoke-test output does not match the expected fixture detections")
 
 
 if __name__ == "__main__":

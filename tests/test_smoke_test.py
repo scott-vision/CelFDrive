@@ -16,16 +16,16 @@ import pytest
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = REPOSITORY_ROOT / "examples" / "run_sample_workflow.py"
-SAMPLE_DIRECTORY = REPOSITORY_ROOT / "sample_data"
+SCRIPT_PATH = REPOSITORY_ROOT / "examples" / "run_smoke_test.py"
+FIXTURE_DIRECTORY = REPOSITORY_ROOT / "tests" / "fixtures" / "synthetic_smoke_test"
 WEIGHTS_PATH = REPOSITORY_ROOT / "Models" / "yolo11x_p99p99_bg05" / "weights" / "best.pt"
 CONFIG_PATH = REPOSITORY_ROOT / "celfdrive_predict.yaml"
 
 GIT_LFS_POINTER_PREFIX = b"version https://git-lfs"
 
 
-def load_sample_workflow_module():
-    specification = importlib.util.spec_from_file_location("sample_workflow", SCRIPT_PATH)
+def load_smoke_test_module():
+    specification = importlib.util.spec_from_file_location("smoke_test", SCRIPT_PATH)
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module
@@ -44,13 +44,13 @@ def unavailable_checkpoint_reason():
     return None
 
 
-def test_sample_fixture_matches_expected_empty_output():
-    sample_workflow = load_sample_workflow_module()
-    expected_path = SAMPLE_DIRECTORY / "expected_detections.json"
+def test_synthetic_fixture_matches_expected_empty_output():
+    smoke_test = load_smoke_test_module()
+    expected_path = FIXTURE_DIRECTORY / "expected_detections.json"
     expected = json.loads(expected_path.read_text(encoding="utf-8"))
 
-    assert sample_workflow.matches_expected([], expected)
-    assert not sample_workflow.matches_expected([[0, 1, 2, 3, 4, 0.5]], expected)
+    assert smoke_test.matches_expected([], expected)
+    assert not smoke_test.matches_expected([[0, 1, 2, 3, 4, 0.5]], expected)
 
 
 def test_bundled_model_returns_the_expected_detections_for_the_fixture():
@@ -63,8 +63,8 @@ def test_bundled_model_returns_the_expected_detections_for_the_fixture():
         sys.path.insert(0, str(REPOSITORY_ROOT))
     import predict
 
-    sample_workflow = load_sample_workflow_module()
-    expected = json.loads((SAMPLE_DIRECTORY / "expected_detections.json").read_text(encoding="utf-8"))
+    smoke_test = load_smoke_test_module()
+    expected = json.loads((FIXTURE_DIRECTORY / "expected_detections.json").read_text(encoding="utf-8"))
 
     config = predict.load_predict_config(CONFIG_PATH)
     config["project"]["repo_path"] = str(REPOSITORY_ROOT)
@@ -73,11 +73,11 @@ def test_bundled_model_returns_the_expected_detections_for_the_fixture():
     predict.configure_prediction_runtime(config)
 
     image = np.loadtxt(
-        SAMPLE_DIRECTORY / "synthetic_blank_image.csv", delimiter=",", dtype=np.uint8
+        FIXTURE_DIRECTORY / "synthetic_blank_image.csv", delimiter=",", dtype=np.uint8
     )
     detections = predict.process_image(
         image, class_info=predict.get_class_info(config["profile"])
     )
 
     assert len(detections) == len(expected["detections"])
-    assert sample_workflow.matches_expected(detections, expected)
+    assert smoke_test.matches_expected(detections, expected)
