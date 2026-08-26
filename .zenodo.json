@@ -1,7 +1,7 @@
 {
   "title": "CelFDrive: Multimodal deep learning-assisted microscopy for automated detection of rare events",
   "upload_type": "software",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "other-nc",
   "description": "<p>CelFDrive is a deep-learning-assisted workflow for automated microscopy. It detects configured cell states in overview images, then returns stage coordinates and capture metadata for a high-resolution workflow. The bundled detector is a fine-tuned YOLO11x object-detection model.</p><p>The current 3i-oriented SlideBook workflow has been deployed on lattice light-sheet (LLSM) and spinning-disk confocal (SDC) systems. CelFDrive can be adapted to control software that exchanges images and target coordinates with Python; each adaptation requires microscope-specific coordinate, capture-command, objective-offset, and hardware-safety validation. The repository also provides CellClicker annotation and training tools.</p><p>The detection model was trained on live-cell SiR-DNA-labelled human RPE-1 microscopy annotated for six mitotic stages. The associated training dataset is referenced as EMBL-EBI BioImage Archive accession S-BIAD3980 (DOI 10.6019/S-BIAD3980).</p>",
   "language": "eng",

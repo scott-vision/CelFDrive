@@ -4,8 +4,8 @@ message: >-
   If you use this software, please cite the versioned Zenodo release. The
   associated journal article will be added when it is published.
 type: software
-version: 1.0.0
-date-released: '2026-08-25'
+version: 1.0.1
+date-released: '2026-08-26'
 abstract: >-
   CelFDrive is software for automated detection of rare cellular events that
   drives high-resolution 3D microscopy acquisition. It integrates deep-learning

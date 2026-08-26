@@ -37,9 +37,9 @@ tests, the configuration editor, the annotation GUIs - works normally.
 **Everything at once**: a plain `git clone` with no environment variable
 downloads the code and all 480 MB of large files.
 
-**Without git**: download the versioned release archive from the Zenodo DOI. It
-is a single zip containing the code and every large file, and needs neither git
-nor Git LFS. This is the recommended route for reviewers and for citing a
+**Without git**: download the [current Zenodo release archive](https://doi.org/10.5281/zenodo.22115209).
+It is a single zip containing the code and every large file, and needs neither
+git nor Git LFS. This is the recommended route for reviewers and for citing a
 specific version.
 
 If Git LFS is not installed, or a `git lfs pull` has not been run, the detector
@@ -47,98 +47,29 @@ weights stay as a pointer file. `python -m pytest -q` and
 `python examples/run_smoke_test.py` both report this explicitly rather
 than failing obscurely.
 
-## Install
+## Install and use CelFDrive
 
-Create the GPU-enabled Windows environment from the repository root:
+On Windows, create the GPU environment from the repository root:
 
 ```powershell
 .\tools\create_windows_conda_env.ps1 -Device gpu
 ```
 
-Run commands without relying on shell activation, for example:
+For CPU-only Windows, macOS, environment verification, and the optional pip
+virtual environment, see the [installation and verification guide](docs/installation.md).
 
-```powershell
-conda run --name celfdrive-windows python -m pytest -q
-```
+Then choose the workflow you need:
 
-To use `conda activate celfdrive-windows` instead, run `conda init powershell`
-once, close the current PowerShell window, and open a new one. Confirm that
-`python -c "import sys; print(sys.executable)"` reports the environment path,
-not a system Python installation.
-
-The Windows environments are Conda Forge-only (`conda-forge` and `nodefaults`): their native scientific stack, OpenCV, and PyTorch all come from one solver, avoiding mixed OpenMP DLLs in SlideBook. The GPU file keeps the existing environment name `celfdrive-windows`. For a computer without an NVIDIA GPU, create `Environments/environment-cpu-windows.yml` instead and activate `celfdrive-windows-cpu`. On macOS, use `Environments/environment-gpu-mac.yml`, activate `celfdrive-macos`, then run `python tools/install_sahi.py`.
-
-The GPU environment uses Conda Forge's `pytorch-gpu` package with CUDA 12.8. The creator first resolves the native packages, then installs SAHI with `pip --no-deps` so pip cannot replace Conda Forge Torch or OpenCV. It finishes by running the GPU verification. Select `gpu` as the inference device in the CelFDrive configuration only after that check succeeds.
-
-The Windows environments use Conda Forge `opencv`, not pip
-`opencv-python` or `opencv-contrib-python`. CelFDrive does not use
-contrib-only APIs, and adding a second OpenCV distribution can load duplicate
-OpenMP runtimes in SlideBook. When rebuilding an existing Windows environment,
-remove it first and recreate it from the environment file rather than
-installing packages into the old one.
-Do not set `KMP_DUPLICATE_LIB_OK=TRUE` as a production workaround: it merely
-suppresses the runtime safety check and can leave acquisition Python unstable.
-
-The environment files describe a *compatible* environment, not an exact one:
-libraries the detector depends on carry an upper bound at the next major
-release, and a few packages carry exact pins that resolved specific solver or
-runtime conflicts. To archive an exact environment, run
-`.\tools\export_environment_lock.ps1 -Name celfdrive-windows` on a machine where
-the environment works and commit the resulting lock file.
-
-## Quick start and local verification
-
-From the repository root, run:
-
-```powershell
-python -m pytest -q
-python examples/run_smoke_test.py
-python tools/verify_slidebook_runtime.py --device cpu
-```
-
-The test suite requires no microscope hardware or downloads. The smoke-test command loads `tests/fixtures/synthetic_smoke_test/synthetic_blank_image.csv`, runs the bundled model, prints JSON detections, and exits successfully only when they match `tests/fixtures/synthetic_smoke_test/expected_detections.json`.
-
-The blank fixture is deliberately synthetic because an approved redistributable microscopy subset is not yet included. See [the fixture documentation](tests/fixtures/synthetic_smoke_test/README.md) before treating it as anything other than an installation check.
-
-`tools/verify_slidebook_runtime.py` is the Windows/SlideBook environment smoke
-test. It imports the inference libraries in the order used by a SlideBook
-callback, then processes a tracked TIFF from the max-projection tutorial with
-the bundled model. It must complete before configuring hardware capture. Pass
-`--device gpu` for the GPU environment; this fails rather than silently using
-CPU when CUDA is unavailable.
-
-### Windows virtual environment alternative
-
-If Conda is not appropriate, create a completely separate pip virtual
-environment—never install these packages into a Conda environment:
-
-```powershell
-.\tools\create_windows_venv.ps1 -Device gpu -CudaWheel cu118
-# Or, for a CPU-only computer:
-.\tools\create_windows_venv.ps1 -Device cpu
-```
-
-The creator uses Python 3.11, installs the selected official PyTorch wheel
-first, installs the remaining pip dependencies, and runs the same runtime
-verification. `cu118` is the default; choose `cu126` or `cu128` only when the
-NVIDIA driver supports it. By default, the two environments use separate
-folders: `.venv-celfdrive-gpu` and `.venv-celfdrive-cpu`.
-
-YOLO phase-model training is available from the unified CellClicker GUI or
-from the same versioned configuration on the command line:
-
-```powershell
-python train.py --config path\to\training.yaml
-```
-
-The GUI can load and save these files; see
-[`examples/yolo_training.example.yaml`](examples/yolo_training.example.yaml)
-and the [CellClicker interface guide](docs/cellclicker-interface-guide.md#7-train-a-phase-model-yolo11).
-
-For a frozen, paper-oriented evaluation on a separately held-out internal data
-set, see [the benchmark workflow](docs/benchmarking.md). It writes outputs to
-`D:\CelFDriveBenchmark\runs` by default and does not modify source labels or
-paper files.
+- **Configure prediction:** run `python run_config_gui.py`, then follow the
+  [prediction configuration](#prediction-configuration) section.
+- **Connect a 3i SlideBook microscope:** follow the [SlideBook direct-Python
+  setup guide](docs/slidebook-capture-script.md).
+- **Annotate images or train a phase model:** start `python run_clicker_gui.py`
+  and use the [CellClicker interface guide](docs/cellclicker-interface-guide.md).
+- **Try the SlideBook-independent inference workflow:** run the
+  [max-projection SAHI notebook example](examples/max_projection_sahi/README.md).
+- **Reproduce the exported-label benchmark:** use the
+  [benchmark workflow](docs/benchmarking.md).
 
 ## Prediction configuration
 
@@ -262,12 +193,10 @@ with it.
 
 ## Citing CelFDrive
 
-Please cite the versioned Zenodo release of CelFDrive that you used. The
-repository's [`CITATION.cff`](CITATION.cff) supplies machine-readable software
-citation metadata; [`.zenodo.json`](.zenodo.json) supplies the corresponding
-Zenodo release metadata, including creators, funding, and the related training
-dataset. The associated journal article will be added to the citation metadata
-after publication.
+Please cite the [CelFDrive Zenodo concept DOI](https://doi.org/10.5281/zenodo.22115209).
+The exact-version DOI is shown on each Zenodo release record. The repository's
+[`CITATION.cff`](CITATION.cff) supplies machine-readable citation metadata and
+[`.zenodo.json`](.zenodo.json) supplies the release metadata.
 
 ## Developer checklist
 

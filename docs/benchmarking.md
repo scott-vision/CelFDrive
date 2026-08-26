@@ -7,7 +7,7 @@ under `D:\CelFDriveBenchmark\runs` by default.
 Run it from the GPU environment:
 
 ```powershell
-conda run -n celfdrive-gpu python -m benchmarks.run_benchmark run --config D:\path\to\paper_test.yaml --name internal_paper_test
+conda run -n celfdrive-windows python -m benchmarks.run_benchmark run --config D:\path\to\paper_test.yaml --name internal_paper_test
 ```
 
 The label CSV must be a *test-only* file with these columns:
