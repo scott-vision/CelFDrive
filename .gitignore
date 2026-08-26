@@ -49,3 +49,6 @@ Paper Resource/
 
 # Local generated logs
 /Logging/
+
+# Local analysis workspace
+/$work/
