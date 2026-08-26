@@ -85,22 +85,5 @@
       "scheme": "url"
     }
   ],
-  "grants": [
-    {
-      "id": "10.13039/501100000265::MR/R015910/1"
-    },
-    {
-      "id": "10.13039/501100000265::MR/W007053/1"
-    },
-    {
-      "id": "10.13039/501100000266::EP/V062522/1"
-    },
-    {
-      "id": "10.13039/100010269::226605/Z/22/Z"
-    },
-    {
-      "id": "10.13039/100010269::208384/Z/17/Z"
-    }
-  ],
   "notes": "Licence: Warwick CelFDrive licence (c) 2024 The University of Warwick — a bespoke, non-commercial licence with no SPDX identifier. Use is subject to the terms in LICENSE.md in the repository. Third-party terms: the bundled detector checkpoints in Models/ were fine-tuned with Ultralytics training code and therefore carry Ultralytics' AGPL-3.0 terms; CelFDrive imports Ultralytics at run time and does not redistribute any Ultralytics source code. The full dependency and checkpoint licence record is in THIRD_PARTY_LICENCES.md in the repository. Funding: MRC iCASE Studentship MR/R015910/1 (project ref 2430216); MRC Core Studentship MR/W007053/1 (project ref 2881331); EPSRC EP/V062522/1; Wellcome Discovery Award 226605/Z/22/Z."
 }
