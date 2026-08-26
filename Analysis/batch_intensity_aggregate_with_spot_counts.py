@@ -34,7 +34,10 @@ matplotlib.use("Agg", force=True)  # type: ignore
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import tifffile as tiff  # noqa: E402
-from scipy.optimize import OptimizeWarning, curve_fit  # noqa: E402
+from recruitment_fitting import (  # noqa: E402
+    fit_tanh_bounded as _fit,
+    tanh_func,  # noqa: F401
+)
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -117,7 +120,6 @@ def load_triplet(
     seg_mask = tiff.imread(str(seg_path))
     spot_mask = tiff.imread(str(spot_path))
     return movie, seg_mask, spot_mask
-
 
 
 def load_filtered_spot_counts(movie_stem: str, n_frames: int) -> np.ndarray:
@@ -238,88 +240,18 @@ def extract_means(
 # -----------------------------------------------------------------------------
 
 
-def tanh_func(
-    x: np.ndarray,
-    a: float,
-    b: float,
-    c: float,
-    d: float,
-) -> np.ndarray:
-    """Model: d + a * tanh(b * (x - c))."""
-    return d + a * np.tanh(b * (x - c))
-
-
 def fit_tanh_bounded(
     times: np.ndarray,
     values: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Fit on normalised time and return x in original units, y-fit, parameters.
 
-    The best successful fit across all initial seeds is retained rather than the
-    first fit that happens to converge.
+    Thin wrapper over :func:`recruitment_fitting.fit_tanh_bounded`, which is
+    shared by every script in this folder. Raises TanhFitError (a
+    RuntimeError) if no starting point converges.
     """
-    mask = np.isfinite(times) & np.isfinite(values)
-    x_raw = np.asarray(times[mask], dtype=float)
-    y_raw = np.asarray(values[mask], dtype=float)
-
-    if x_raw.size < 4:
-        raise RuntimeError("Too few finite data points for fitting")
-
-    x_span = float(np.ptp(x_raw))
-    if x_span > 0:
-        x_norm = (x_raw - x_raw.min()) / x_span
-    else:
-        x_norm = np.zeros_like(x_raw)
-
-    y_min = float(np.min(y_raw))
-    y_max = float(np.max(y_raw))
-    y_span = y_max - y_min
-
-    if y_span <= 0:
-        raise RuntimeError("No intensity variation to fit")
-
-    amp_guess = y_span / 2.0
-    d_guess = y_min
-
-    slope_seeds = (0.5, 1.0, 2.0, 5.0, 10.0)
-    centre_seeds = (0.20, 0.35, 0.50, 0.65, 0.80)
-
-    bounds_lower = (0.0, 0.0, 0.0, y_min)
-    bounds_upper = (np.inf, np.inf, 1.0, y_max)
-
-    best_popt: np.ndarray | None = None
-    best_sse = np.inf
-
-    for b0 in slope_seeds:
-        for c0 in centre_seeds:
-            p0 = (amp_guess, b0, c0, d_guess)
-            try:
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", category=OptimizeWarning)
-                    popt, _ = curve_fit(
-                        tanh_func,
-                        x_norm,
-                        y_raw,
-                        p0=p0,
-                        bounds=(bounds_lower, bounds_upper),
-                        maxfev=50000,
-                    )
-
-                residuals = y_raw - tanh_func(x_norm, *popt)
-                sse = float(np.sum(residuals**2))
-                if np.isfinite(sse) and sse < best_sse:
-                    best_sse = sse
-                    best_popt = popt
-            except (RuntimeError, ValueError, FloatingPointError):
-                continue
-
-    if best_popt is None:
-        raise RuntimeError("tanh fit failed for all initial guesses")
-
-    x_fine_norm = np.linspace(0.0, 1.0, 300)
-    y_fit = tanh_func(x_fine_norm, *best_popt)
-    x_fine = x_raw.min() + x_fine_norm * x_span
-    return x_fine, y_fit, best_popt
+    fit = _fit(times, values)
+    return fit["x_fit_s"], fit["y_fit"], fit["popt"]
 
 
 # -----------------------------------------------------------------------------

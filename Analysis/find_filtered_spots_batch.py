@@ -52,8 +52,10 @@ INPUT_DIR = Path(
 
 SEGMENTATION_DIR = INPUT_DIR / "segmentation_outputs_batch"
 
-OUTPUT_DIR = INPUT_DIR / "filtered_spotmask_outputs_batch"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# Output directory is tagged with the ROI setting, so a physical-ROI run never
+# overwrites the legacy outputs and runs at different diameters can be
+# compared side by side.  RUN_TAG is built after the ROI config below.
+OUTPUT_DIR = None  # set by _configure_output_dir() once the ROI is known
 
 
 # Channel containing NDC80
@@ -71,17 +73,102 @@ THRESH_PCNT = 99.7
 # Minimum distance between detected local maxima
 MIN_DISTANCE = 2
 
-# Radius of sphere drawn around each retained peak
+# ---------------------------------------------------------------------------
+# Measurement region around each retained peak
+#
+# The original script drew the sphere in VOXEL space:
+#     (dz**2 + dy**2 + dx**2) <= SPOT_RADIUS**2,  SPOT_RADIUS = 2 voxels
+# Because the deskewed voxel is anisotropic (0.271 um in z, 0.104 um in x/y),
+# that region is not a sphere in physical space: it reaches +/-0.21 um
+# laterally but +/-0.54 um axially, i.e. ~0.42 x 0.42 x 1.08 um.
+#
+# Setting USE_PHYSICAL_ROI = True instead applies the distance test in
+# micrometres, so the region is a true sphere of SPOT_DIAMETER_UM diameter.
+#
+# Note the axial sampling limit: with 0.271 um z-spacing, any diameter below
+# ~0.542 um resolves to a single z-plane.  0.3 um therefore gives a 9-voxel
+# disc in one plane; 0.6 um gives three planes.  Both are printed at startup.
+# ---------------------------------------------------------------------------
+
+USE_PHYSICAL_ROI = True
+
+# Voxel size of the deconvolved, deskewed stacks, (z, y, x) in micrometres
+VOXEL_SIZE_UM = (0.271, 0.104, 0.104)
+
+# Diameter of the measurement region in micrometres (USE_PHYSICAL_ROI = True)
+SPOT_DIAMETER_UM = 0.3
+
+# Radius in voxels, used only when USE_PHYSICAL_ROI = False (legacy behaviour)
 SPOT_RADIUS = 2
 
 # Biological maximum
 MAX_SPOTS_PER_CELL = 92
 
-# Pixel size for ImageJ metadata
-PIXEL_SIZE = 0.1625
+# Pixel size for ImageJ metadata, um/pixel in x and y
+PIXEL_SIZE = VOXEL_SIZE_UM[1]
 
-# Time between frames
+# Time between frames.  NOTE: this is the nominal interval.  The movie
+# metadata records the achieved interval (ImageJ "finterval"), which may
+# differ by a few per cent and scales all derived recruitment times.
 TIME_INTERVAL = 8
+
+
+def _configure_output_dir() -> Path:
+    """Tag the output directory with the ROI actually used."""
+
+    if USE_PHYSICAL_ROI:
+        tag = f"physical_{SPOT_DIAMETER_UM:g}um".replace(".", "p")
+    else:
+        tag = f"legacy_r{SPOT_RADIUS}vox"
+
+    out = INPUT_DIR / f"filtered_spotmask_outputs_batch_{tag}"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+OUTPUT_DIR = _configure_output_dir()
+
+
+# ---------------------------------------------------------------------------
+# Optional sweep: run several ROI settings back to back in one invocation.
+#
+# Each entry overrides the constants above for one run and writes to its own
+# tagged output directory, so the results can be compared directly.  Set to []
+# to run only the single configuration defined above.
+#
+# The default sweep is the comparison needed to show that the recruitment
+# delay does not depend on ROI geometry:
+#     0.3 um  biologically sized kinetochore region, one z-plane
+#     0.6 um  smallest true sphere spanning three z-planes
+#     legacy  reproduces the original radius-2-voxel region exactly
+# ---------------------------------------------------------------------------
+
+ROI_SWEEP = [
+    {"USE_PHYSICAL_ROI": True, "SPOT_DIAMETER_UM": 0.3},
+    {"USE_PHYSICAL_ROI": True, "SPOT_DIAMETER_UM": 0.6},
+    {"USE_PHYSICAL_ROI": False, "SPOT_RADIUS": 2},
+]
+
+
+def _apply_roi_config(config: dict) -> None:
+    """Override the ROI constants for one sweep entry."""
+
+    global USE_PHYSICAL_ROI
+    global SPOT_DIAMETER_UM
+    global SPOT_RADIUS
+    global OUTPUT_DIR
+
+    USE_PHYSICAL_ROI = config.get(
+        "USE_PHYSICAL_ROI", USE_PHYSICAL_ROI
+    )
+    SPOT_DIAMETER_UM = config.get(
+        "SPOT_DIAMETER_UM", SPOT_DIAMETER_UM
+    )
+    SPOT_RADIUS = config.get(
+        "SPOT_RADIUS", SPOT_RADIUS
+    )
+
+    OUTPUT_DIR = _configure_output_dir()
 
 
 # =============================================================================
@@ -99,24 +186,135 @@ SpotCandidate = Tuple[int, int, int, float]
 
 def create_sphere(
     center: Tuple[int, int, int],
-    radius: int,
+    radius: float,
     shape: Tuple[int, int, int],
+    voxel_size: Tuple[float, float, float] = None,
 ) -> cp.ndarray:
     """
     Return a boolean CuPy array containing a filled sphere.
+
+    voxel_size is None
+        radius is in VOXELS and the distance test is applied in index space,
+        reproducing the original behaviour.  On anisotropic data the result
+        is an ellipsoid in physical space, not a sphere.
+
+    voxel_size given as (dz, dy, dx) in micrometres
+        radius is in MICROMETRES and the distance test is applied in physical
+        space, so the region is a true sphere regardless of anisotropy.
     """
 
     z0, y0, x0 = center
 
     z, y, x = cp.indices(shape)
 
-    dist_sq = (
-        (z - z0) ** 2
-        + (y - y0) ** 2
-        + (x - x0) ** 2
-    )
+    if voxel_size is None:
+        dist_sq = (
+            (z - z0) ** 2
+            + (y - y0) ** 2
+            + (x - x0) ** 2
+        )
+    else:
+        dz, dy, dx = voxel_size
+        dist_sq = (
+            ((z - z0) * dz) ** 2
+            + ((y - y0) * dy) ** 2
+            + ((x - x0) * dx) ** 2
+        )
 
     return dist_sq <= radius ** 2
+
+
+def roi_geometry() -> dict:
+    """
+    Describe the measurement region without needing a GPU.
+
+    Returns the number of voxels included, how many z-planes they span, and
+    the physical extent, so the region can be checked before a run and
+    recorded in options.yaml afterwards.
+    """
+
+    import itertools
+
+    dz, dy, dx = VOXEL_SIZE_UM
+
+    if USE_PHYSICAL_ROI:
+
+        radius = SPOT_DIAMETER_UM / 2.0
+
+        reach = (
+            int(radius // dz) + 1,
+            int(radius // dy) + 1,
+            int(radius // dx) + 1,
+        )
+
+        offsets = [
+            o
+            for o in itertools.product(
+                range(-reach[0], reach[0] + 1),
+                range(-reach[1], reach[1] + 1),
+                range(-reach[2], reach[2] + 1),
+            )
+            if (o[0] * dz) ** 2
+            + (o[1] * dy) ** 2
+            + (o[2] * dx) ** 2
+            <= radius ** 2
+        ]
+
+    else:
+
+        radius = SPOT_RADIUS
+
+        offsets = [
+            o
+            for o in itertools.product(
+                range(-radius, radius + 1),
+                repeat=3,
+            )
+            if o[0] ** 2 + o[1] ** 2 + o[2] ** 2 <= radius ** 2
+        ]
+
+    span = [
+        max(abs(o[i]) for o in offsets)
+        for i in range(3)
+    ]
+
+    return {
+        "n_voxels": len(offsets),
+        "z_planes": 2 * span[0] + 1,
+        "extent_um_zyx": [
+            round(2 * span[0] * dz, 4),
+            round(2 * span[1] * dy, 4),
+            round(2 * span[2] * dx, 4),
+        ],
+    }
+
+
+def describe_roi() -> str:
+    """Human-readable summary of the measurement region."""
+
+    geom = roi_geometry()
+
+    if USE_PHYSICAL_ROI:
+        mode = (
+            f"physical sphere, "
+            f"{SPOT_DIAMETER_UM:g} um diameter"
+        )
+    else:
+        mode = (
+            f"legacy voxel sphere, "
+            f"radius {SPOT_RADIUS} voxels"
+        )
+
+    ez, ey, ex = geom["extent_um_zyx"]
+
+    return (
+        f"Measurement region: {mode}\n"
+        f"    voxel size (z,y,x) : {VOXEL_SIZE_UM} um\n"
+        f"    voxels per spot    : {geom['n_voxels']}\n"
+        f"    z-planes spanned   : {geom['z_planes']}\n"
+        f"    extent (z,y,x)     : {ez} x {ey} x {ex} um"
+    )
+
 
 
 # =============================================================================
@@ -276,11 +474,26 @@ def build_mask_from_spots(
     spots: List[SpotCandidate],
     shape: Tuple[int, int, int],
     *,
-    spot_radius: int = SPOT_RADIUS,
+    spot_radius: float = None,
+    voxel_size: Tuple[float, float, float] = None,
 ) -> np.ndarray:
     """
     Construct a binary 3-D mask using ONLY the retained spots.
+
+    With USE_PHYSICAL_ROI the radius is in micrometres and voxel_size is
+    supplied, so each region is a true sphere in physical space.  Otherwise
+    the radius is in voxels and the original index-space test is used.
     """
+
+    if spot_radius is None:
+        spot_radius = (
+            SPOT_DIAMETER_UM / 2.0
+            if USE_PHYSICAL_ROI
+            else SPOT_RADIUS
+        )
+
+    if voxel_size is None and USE_PHYSICAL_ROI:
+        voxel_size = VOXEL_SIZE_UM
 
     mask_gpu = cp.zeros(
         shape,
@@ -293,6 +506,7 @@ def build_mask_from_spots(
             center=(z, y, x),
             radius=spot_radius,
             shape=shape,
+            voxel_size=voxel_size,
         )
 
         mask_gpu[sphere] = 1
@@ -608,7 +822,6 @@ def process_file(
                     height,
                     width,
                 ),
-                spot_radius=SPOT_RADIUS,
             )
 
             masks_out[frame] = final_mask
@@ -838,8 +1051,24 @@ def save_options_yaml() -> None:
         "min_distance": (
             MIN_DISTANCE
         ),
-        "spot_radius": (
-            SPOT_RADIUS
+        "use_physical_roi": (
+            USE_PHYSICAL_ROI
+        ),
+        "voxel_size_um_zyx": list(
+            VOXEL_SIZE_UM
+        ),
+        "spot_diameter_um": (
+            SPOT_DIAMETER_UM
+            if USE_PHYSICAL_ROI
+            else None
+        ),
+        "spot_radius_voxels": (
+            None
+            if USE_PHYSICAL_ROI
+            else SPOT_RADIUS
+        ),
+        "roi_voxel_count": (
+            roi_geometry()["n_voxels"]
         ),
         "max_spots_per_cell": (
             MAX_SPOTS_PER_CELL
@@ -886,17 +1115,11 @@ def save_options_yaml() -> None:
 # Main
 # =============================================================================
 
-def main() -> int:
+def run_one() -> int:
+    """Process every movie once, using the ROI currently configured."""
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format=(
-            "[%(asctime)s] "
-            "%(levelname)s - "
-            "%(message)s"
-        ),
-        datefmt="%H:%M:%S",
-    )
+    for line in describe_roi().split("\n"):
+        logging.info(line)
 
     save_options_yaml()
 
@@ -944,6 +1167,45 @@ def main() -> int:
     )
 
     return 0
+
+
+def main() -> int:
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format=(
+            "[%(asctime)s] "
+            "%(levelname)s - "
+            "%(message)s"
+        ),
+        datefmt="%H:%M:%S",
+    )
+
+    configs = ROI_SWEEP or [None]
+
+    status = 0
+
+    for index, config in enumerate(configs, start=1):
+
+        if config is not None:
+            _apply_roi_config(config)
+
+        if len(configs) > 1:
+            logging.info(
+                "===== ROI run %d of %d =====",
+                index,
+                len(configs),
+            )
+
+        status |= run_one()
+
+    if len(configs) > 1:
+        logging.info(
+            "Sweep complete: %d ROI setting(s) processed",
+            len(configs),
+        )
+
+    return status
 
 
 if __name__ == "__main__":

@@ -2,14 +2,41 @@
 """
 Per-cell NDC80 / NUP107 recruitment timing analysis.
 
+Fits the bounded four-parameter tanh model
+
+    y = d + a * tanh(b * (x - c))
+
+independently to the NDC80 and NUP107 intensity trace of each movie, where x
+is within-movie time normalised to [0, 1]. The fitted inflection c is
+converted back to seconds to give the half-maximal recruitment time t50, and
+the within-cell difference
+
+    delta_t50 = t50(NUP107) - t50(NDC80)
+
+is reported per cell and summarised across cells. Positive values indicate
+later NUP107 recruitment.
+
+Input CSV columns required:
+    movie, time_s, ndc80_mean_raw, nup_mean_raw
+
+Outputs, written to --output-dir (default: the input CSV's directory):
+    per_cell_recruitment_times.csv    one row per movie, all fitted parameters
+    recruitment_time_summary.csv      one row, across-cell summary
+    recruitment_t50_paired_plot.*     per-cell t50, NDC80 vs NUP107
+    recruitment_delta_t50_plot.*      per-cell delta_t50
+
 Usage:
     python analyse_recruitment_timing.py /path/to/all_raw_intensities.csv
+    python analyse_recruitment_timing.py all_raw_intensities.csv \
+        --output-dir results --n-boot 10000 --seed 42
+
+The fitting itself lives in recruitment_fitting.py, which every script in
+this folder shares.
 """
 
 from __future__ import annotations
 
 import argparse
-import warnings
 from pathlib import Path
 
 import matplotlib
@@ -17,89 +44,26 @@ matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.optimize import curve_fit
 from scipy.stats import ttest_rel, wilcoxon
 
-
-def tanh_func(x, a, b, c, d):
-    return d + a * np.tanh(b * (x - c))
+from recruitment_fitting import fit_tanh_or_reason, tanh_func  # noqa: F401
 
 
 def fit_tanh_bounded(times_s, values):
-    mask = np.isfinite(times_s) & np.isfinite(values)
-    t = np.asarray(times_s[mask], dtype=float)
-    y = np.asarray(values[mask], dtype=float)
+    """Fit one trace, returning ``(fit, "")`` or ``(None, reason)``.
 
-    if t.size < 4:
-        return None, "too_few_points"
-
-    t0 = float(t.min())
-    span = float(np.ptp(t))
-    if span <= 0:
-        return None, "zero_time_span"
-
-    x = (t - t0) / span
-    y_min = float(y.min())
-    y_max = float(y.max())
-
-    if y_max <= y_min:
-        return None, "no_intensity_variation"
-
-    best_popt = None
-    best_sse = np.inf
-
-    for b0 in (0.5, 1.0, 2.0, 5.0, 10.0):
-        for c0 in (0.20, 0.35, 0.50, 0.65, 0.80):
-            try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    popt, _ = curve_fit(
-                        tanh_func,
-                        x,
-                        y,
-                        p0=((y_max - y_min) / 2.0, b0, c0, y_min),
-                        bounds=((0.0, 0.0, 0.0, y_min), (np.inf, np.inf, 1.0, y_max)),
-                        maxfev=50000,
-                    )
-
-                pred = tanh_func(x, *popt)
-                sse = float(np.sum((y - pred) ** 2))
-
-                if np.isfinite(sse) and sse < best_sse:
-                    best_popt = popt
-                    best_sse = sse
-            except Exception:
-                pass
-
-    if best_popt is None:
-        return None, "fit_failed"
-
-    a, b, c, d = [float(v) for v in best_popt]
-
-    def fraction_time(frac):
-        if b <= 0:
-            return np.nan
-        x_frac = c + np.arctanh(2.0 * frac - 1.0) / b
-        return t0 + x_frac * span
-
-    return {
-        "a": a,
-        "b": b,
-        "c_norm": c,
-        "d": d,
-        "lower_plateau": d - a,
-        "upper_plateau": d + a,
-        "t10_s": fraction_time(0.10),
-        "t50_s": t0 + c * span,
-        "t90_s": fraction_time(0.90),
-        "fit_sse": best_sse,
-        "n_points": int(t.size),
-        "movie_start_s": t0,
-        "movie_end_s": float(t.max()),
-    }, ""
+    Thin wrapper over :func:`recruitment_fitting.fit_tanh_or_reason` so that
+    failures are counted per cell rather than aborting the run.
+    """
+    return fit_tanh_or_reason(times_s, values)
 
 
 def bootstrap_ci(values, statistic, n_boot=10000, seed=42):
+    """Percentile bootstrap 95% confidence interval for `statistic`.
+
+    The seed is fixed so that repeated runs on the same data give identical
+    intervals; pass --seed to change it.
+    """
     values = np.asarray(values, dtype=float)
     if values.size == 0:
         return np.nan, np.nan
@@ -116,9 +80,19 @@ def bootstrap_ci(values, statistic, n_boot=10000, seed=42):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("input_csv", type=Path)
-    parser.add_argument("--output-dir", type=Path, default=None)
+    """Fit every movie, write the per-cell table, summary and plots."""
+    parser = argparse.ArgumentParser(
+        description="Per-cell NDC80/NUP107 recruitment timing from "
+                    "all_raw_intensities.csv")
+    parser.add_argument("input_csv", type=Path,
+                        help="all_raw_intensities.csv from step 2")
+    parser.add_argument("--output-dir", type=Path, default=None,
+                        help="defaults to the input CSV's directory")
+    parser.add_argument("--n-boot", type=int, default=10000, metavar="N",
+                        help="bootstrap resamples for the confidence "
+                             "intervals")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="seed for the bootstrap, for reproducibility")
     args = parser.parse_args()
 
     input_csv = args.input_csv.expanduser().resolve()
@@ -190,8 +164,8 @@ def main():
 
     mean_delta = float(np.mean(delta)) if len(delta) else np.nan
     median_delta = float(np.median(delta)) if len(delta) else np.nan
-    mean_ci = bootstrap_ci(delta, np.mean)
-    median_ci = bootstrap_ci(delta, np.median)
+    mean_ci = bootstrap_ci(delta, np.mean, args.n_boot, args.seed)
+    median_ci = bootstrap_ci(delta, np.median, args.n_boot, args.seed)
 
     if len(delta) and not np.allclose(delta, 0):
         w = wilcoxon(delta, alternative="two-sided", zero_method="wilcox", method="auto")
