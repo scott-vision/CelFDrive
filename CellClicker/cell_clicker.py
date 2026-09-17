@@ -317,6 +317,11 @@ class ImageViewer:
         self.rect = None
         self.bbox_details = None
 
+        # Size the image is actually drawn at. The canvas is packed to fill the
+        # window, so once the window stops matching the image's aspect ratio the
+        # two differ and only this one may be used to convert coordinates.
+        self.displayed_size = None
+
         # Load images
         self.images = []
         self.series_images = {}
@@ -559,6 +564,7 @@ class ImageViewer:
 
             # Update canvas dimensions
             self.canvas.config(width=new_width, height=new_height)
+            self.displayed_size = (new_width, new_height)
 
             # Clear and redraw the image
             self.canvas.delete("all")  # Remove previous image to prevent layering
@@ -573,6 +579,27 @@ class ImageViewer:
             resized_image = self.original_image.resize((width, height), Image.Resampling.LANCZOS)
             self.photo_img = ImageTk.PhotoImage(resized_image)
             self.canvas.create_image(0, 0, image=self.photo_img, anchor=tk.NW)
+
+    def displayed_image_size(self):
+        """Return the on-screen size of the image, which is not the canvas size.
+
+        ``pack(fill=BOTH, expand=True)`` overrides the width and height the
+        canvas is configured with, so a maximised window leaves letterbox space
+        beside or below the image that must not be counted when scaling boxes.
+        """
+        if self.displayed_size and all(self.displayed_size):
+            return self.displayed_size
+        return self.canvas.winfo_width(), self.canvas.winfo_height()
+
+    def image_to_canvas_scale(self):
+        """Return the factors taking stored image pixels to canvas pixels."""
+        width, height = self.displayed_image_size()
+        return width / self.original_image.width, height / self.original_image.height
+
+    def canvas_to_image_scale(self):
+        """Return the factors taking canvas pixels back to stored image pixels."""
+        width, height = self.displayed_image_size()
+        return self.original_image.width / width, self.original_image.height / height
 
     def display_image(self):
         if self.original_image:
@@ -593,6 +620,7 @@ class ImageViewer:
 
             # Update the canvas size dynamically
             self.canvas.config(width=new_width, height=new_height)
+            self.displayed_size = (new_width, new_height)
 
             # Display the resized image
             self.photo_img = ImageTk.PhotoImage(self.resized_image)
@@ -628,8 +656,7 @@ class ImageViewer:
     def inspect_bbox(self):
         if self.bbox_details and self.original_image:
             # Calculate scale factors
-            scale_x = self.original_image.width / self.canvas.winfo_width()
-            scale_y = self.original_image.height / self.canvas.winfo_height()
+            scale_x, scale_y = self.canvas_to_image_scale()
 
             # Adjust coordinates
             original_x = int(self.bbox_details['x'] * scale_x)
@@ -660,8 +687,7 @@ class ImageViewer:
         self.canvas.delete("delete_x")  # Clear previous delete markers
         self.delete_buttons = {}  # Store delete button references
 
-        scale_x = self.canvas.winfo_width() / self.original_image.width
-        scale_y = self.canvas.winfo_height() / self.original_image.height
+        scale_x, scale_y = self.image_to_canvas_scale()
 
         for bbox in self.existing_bboxes:
             x, y, w, h, series_id, is_last = bbox  # Extract data
@@ -735,8 +761,7 @@ class ImageViewer:
         item_id = self.canvas.find_closest(event.x, event.y)[0]
         for bbox in self.existing_bboxes:
             x, y, width, height, series_id, _ = bbox
-            scale_x = self.canvas.winfo_width() / self.original_image.width
-            scale_y = self.canvas.winfo_height() / self.original_image.height
+            scale_x, scale_y = self.image_to_canvas_scale()
             if int(x * scale_x) <= event.x <= int((x + width) * scale_x) and int(y * scale_y) <= event.y <= int((y + height) * scale_y):
                 if not messagebox.askyesno(
                     "Extend Track Earlier",

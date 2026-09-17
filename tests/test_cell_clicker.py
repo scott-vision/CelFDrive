@@ -251,3 +251,71 @@ def test_a_lost_focus_query_does_not_block_navigation():
 
     assert viewer.right_arrow(None) == "break"
     assert viewer.current_image == 1
+
+
+class _FakeCanvas:
+    """Canvas stand-in reporting the size pack gave it, not the image's size."""
+
+    def __init__(self, width, height):
+        self.width, self.height = width, height
+
+    def winfo_width(self):
+        return self.width
+
+    def winfo_height(self):
+        return self.height
+
+
+class _FakeImage:
+    def __init__(self, width, height):
+        self.width, self.height = width, height
+
+
+def _viewer_showing(original, displayed, canvas):
+    """A viewer whose image is drawn at `displayed` inside a `canvas`-sized area."""
+    viewer = ImageViewer.__new__(ImageViewer)
+    viewer.original_image = _FakeImage(*original)
+    viewer.displayed_size = displayed
+    viewer.canvas = _FakeCanvas(*canvas)
+    return viewer
+
+
+def test_displayed_image_size_ignores_letterbox_space_around_the_image():
+    """Maximising widens the canvas past the image, which must not change scale."""
+    viewer = _viewer_showing(original=(600, 450), displayed=(1200, 900), canvas=(1920, 900))
+
+    assert viewer.displayed_image_size() == (1200, 900)
+    assert viewer.image_to_canvas_scale() == (2.0, 2.0)
+
+
+def test_boxes_keep_their_scale_when_the_window_stops_matching_the_image():
+    """The same box must land in the same place however wide the window is."""
+    square = _viewer_showing(original=(600, 450), displayed=(1200, 900), canvas=(1200, 900))
+    wide = _viewer_showing(original=(600, 450), displayed=(1200, 900), canvas=(1920, 1000))
+
+    assert wide.image_to_canvas_scale() == square.image_to_canvas_scale()
+
+
+def test_a_box_drawn_on_a_letterboxed_canvas_is_stored_at_the_right_place():
+    """Canvas coordinates must convert back to the image pixels they cover."""
+    viewer = _viewer_showing(original=(600, 450), displayed=(1200, 900), canvas=(1920, 1000))
+
+    scale_x, scale_y = viewer.canvas_to_image_scale()
+
+    assert (round(1100 * scale_x), round(880 * scale_y)) == (550, 440)
+
+
+def test_image_and_canvas_scales_are_inverses():
+    viewer = _viewer_showing(original=(640, 512), displayed=(1000, 800), canvas=(1600, 800))
+    to_canvas = viewer.image_to_canvas_scale()
+    to_image = viewer.canvas_to_image_scale()
+
+    assert [round(a * b, 9) for a, b in zip(to_canvas, to_image)] == [1.0, 1.0]
+
+
+@pytest.mark.parametrize("displayed", [None, (0, 0), (1200, 0)])
+def test_the_canvas_size_is_used_until_the_image_has_been_drawn(displayed):
+    """Before the first draw there is no image geometry to prefer."""
+    viewer = _viewer_showing(original=(600, 450), displayed=displayed, canvas=(800, 600))
+
+    assert viewer.displayed_image_size() == (800, 600)

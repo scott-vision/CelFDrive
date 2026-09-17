@@ -69,9 +69,12 @@ def find_labels_and_extract_rois(xml_path, label_name, image_path):
                 half_width = int(width * image.shape[1] / 2)
                 half_height = int(height * image.shape[0] / 2)
 #                 print(x_center_pixel, y_center_pixel)
-                # Crop the ROI from the image
+                # Crop the ROI from the image. Copy it: a numpy slice is a
+                # view onto the decoded frame, so keeping one would hold that
+                # whole frame (tens of megabytes) alive for as long as the ROI
+                # is stored, once per label rather than once per frame.
                 roi = image[y_center_pixel - half_height:y_center_pixel + half_height,
-                            x_center_pixel - half_width:x_center_pixel + half_width]
+                            x_center_pixel - half_width:x_center_pixel + half_width].copy()
 
                 image_path = get_previous_image_name(image_path)
 #                 print(image_path)
