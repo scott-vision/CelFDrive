@@ -49,6 +49,23 @@ def matches_expected(detections, expected):
     return True
 
 
+def result_summary(detections, expected):
+    """Describe whether fixture inference produced its versioned expected result."""
+    observed_count = len(detections)
+    expected_count = len(expected["detections"])
+    if matches_expected(detections, expected):
+        return (
+            "Smoke test passed: "
+            f"{observed_count} detection(s) matched the expected fixture output "
+            f"({expected_count} expected)."
+        )
+    return (
+        "Smoke test failed: "
+        f"{observed_count} detection(s) did not match the expected fixture output "
+        f"({expected_count} expected)."
+    )
+
+
 def main():
     """Load the smoke fixture, run inference, and verify its expected output."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -81,9 +98,10 @@ def main():
 
     class_info = predict.get_class_info(config["profile"])
     detections = predict.process_image(image, class_info=class_info)
-    print(json.dumps(serialise_detections(detections), indent=2))
+    print(result_summary(detections, expected))
 
     if not matches_expected(detections, expected):
+        print(json.dumps(serialise_detections(detections), indent=2))
         raise SystemExit("Smoke-test output does not match the expected fixture detections")
 
 

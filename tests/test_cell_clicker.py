@@ -1,4 +1,5 @@
 import pytest
+from PIL import Image
 
 from CellClicker import cell_clicker
 from CellClicker.image_series import UnsupportedFrameNamingError, series_menu_labels
@@ -6,9 +7,14 @@ from CellClicker.cell_clicker import (
     IMAGE_VIEWER_HELP_TEXT,
     ImageProcessor,
     ImageViewer,
+    PIL_RESAMPLING,
     centered_window_position,
     display_coordinate_to_roi_coordinate,
 )
+
+
+def test_resampling_filter_works_with_the_installed_pillow_version():
+    assert PIL_RESAMPLING.LANCZOS == getattr(Image, "Resampling", Image).LANCZOS
 
 
 class _FakeRoot:
@@ -151,12 +157,14 @@ def test_navigation_cannot_step_out_of_the_selected_series():
 
     assert viewer.current_image == len(SERIES_A) - 1
     assert viewer.images[viewer.current_image] == SERIES_A[-1]
+    assert viewer.frame_number.get() == str(len(SERIES_A) - 1)
 
     for _ in range(len(SERIES_B) + 2):
         viewer.prev_image()
 
     assert viewer.current_image == 0
     assert viewer.images[viewer.current_image] == SERIES_A[0]
+    assert viewer.frame_number.get() == "0"
 
 
 def test_direct_frame_entry_is_rejected_beyond_the_selected_series(monkeypatch):

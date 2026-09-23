@@ -19,6 +19,7 @@ sam2_*.pt
 # Generated mitotic-tightener datasets, training runs, and downloaded weights
 Models/tightener_datasets/
 Models/tightener_runs/
+Models/yolo11n.pt
 Models/yolo11x_p99p99_bg05/*
 !Models/yolo11x_p99p99_bg05/weights/
 Models/yolo11x_p99p99_bg05/weights/*

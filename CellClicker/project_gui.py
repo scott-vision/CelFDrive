@@ -39,7 +39,7 @@ from .project_paths import (
     migrate_legacy_cell_regions_xml,
     resolve_cell_regions_xml,
 )
-from .tiff_project_import import available_channel_indices, create_projects_from_tiff_folder
+from .tiff_project_import import available_channel_indices, create_projects_from_tiff_folder, describe_tiff_axes
 
 
 LOGGER = logging.getLogger(__name__)
@@ -260,7 +260,7 @@ class ProjectGUI:
         """Open the TIFF-folder import dialog and load a newly created project."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Create Project from TIFF Folder")
-        dialog.geometry("650x260")
+        dialog.geometry("700x390")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
@@ -268,21 +268,67 @@ class ProjectGUI:
         source_var = tk.StringVar()
         output_var = tk.StringVar()
         channel_var = tk.StringVar(value="0")
+        time_axis_var = tk.StringVar(value="Automatic")
+        channel_axis_var = tk.StringVar(value="Automatic")
+        z_reduction_var = tk.StringVar(value="Maximum project")
         separate_var = tk.BooleanVar(value=False)
         channel_menu = ttk.Combobox(dialog, textvariable=channel_var, state="disabled", width=10)
+        time_axis_menu = ttk.Combobox(dialog, textvariable=time_axis_var, state="disabled", width=30)
+        channel_axis_menu = ttk.Combobox(dialog, textvariable=channel_axis_var, state="disabled", width=30)
+        axis_values = {}
+
+        def selected_axis(variable):
+            return axis_values[variable.get()]
+
+        def update_channel_choices(*_):
+            if not source_var.get():
+                return
+            try:
+                channels = available_channel_indices(source_var.get(), selected_axis(channel_axis_var))
+            except (OSError, ValueError, FileNotFoundError) as exc:
+                messagebox.showerror("TIFF Axis Mapping", str(exc), parent=dialog)
+                return
+            channel_menu.configure(values=[str(index) for index in channels], state="readonly")
+            channel_var.set(str(channels[0]))
+
+        def configure_axis_menus(source):
+            description = describe_tiff_axes(source)
+            axes, shape = description["axes"], description["shape"]
+            spatial_axes = set(description["spatial_axes"])
+            choices = []
+            axis_values.clear()
+            for index, (axis, size) in enumerate(zip(axes, shape)):
+                if index not in spatial_axes:
+                    label = f"Dimension {index}: {axis} (size {size})"
+                    choices.append(label)
+                    axis_values[label] = index
+            time_auto = "Automatic (metadata/inferred time)"
+            channel_auto = "Automatic (metadata channel)"
+            no_time = "None (single output frame)"
+            no_channel = "None (grayscale)"
+            axis_values[time_auto] = "auto"
+            axis_values[channel_auto] = "auto"
+            axis_values[no_time] = None
+            axis_values[no_channel] = None
+            time_axis_menu.configure(values=[time_auto, no_time, *choices], state="readonly")
+            channel_axis_menu.configure(values=[channel_auto, no_channel, *choices], state="readonly")
+            suggested_time = description["time_axis"]
+            suggested_channel = description["channel_axis"]
+            time_axis_var.set(time_auto if suggested_time is not None else no_time)
+            channel_axis_var.set(channel_auto if suggested_channel is not None else no_channel)
+            return description
 
         def choose_source():
             source = filedialog.askdirectory(title="Select Folder Containing TIFF Time Series", parent=dialog)
             if not source:
                 return
             try:
-                channels = available_channel_indices(source)
+                configure_axis_menus(source)
             except (OSError, ValueError, FileNotFoundError) as exc:
                 messagebox.showerror("TIFF Folder", str(exc), parent=dialog)
                 return
             source_var.set(os.path.normpath(source))
-            channel_menu.configure(values=[str(index) for index in channels], state="readonly")
-            channel_var.set(str(channels[0]))
+            update_channel_choices()
             if not output_var.get():
                 output_var.set(os.path.join(os.path.dirname(source), f"{os.path.basename(source)}_cellclicker"))
 
@@ -306,6 +352,9 @@ class ProjectGUI:
                     "Creating normalized CellClicker images...",
                     lambda progress: create_projects_from_tiff_folder(
                         source_var.get(), output_var.get(), channel_index, separate_var.get(), progress,
+                        time_axis=selected_axis(time_axis_var),
+                        channel_axis=selected_axis(channel_axis_var),
+                        z_reduction={"Maximum project": "max", "First Z slice": "first"}[z_reduction_var.get()],
                     ),
                 )
             except (OSError, ValueError, FileExistsError, RuntimeError) as exc:
@@ -330,10 +379,17 @@ class ProjectGUI:
         tk.Button(dialog, text="Browse…", command=choose_output).grid(row=1, column=2, padx=(0, 12), pady=6)
         tk.Label(dialog, text="Channel:").grid(row=2, column=0, sticky="w", padx=12, pady=6)
         channel_menu.grid(row=2, column=1, sticky="w", padx=6, pady=6)
-        tk.Checkbutton(dialog, text="Create one project per TIFF instead", variable=separate_var).grid(row=3, column=1, sticky="w", padx=6, pady=6)
-        tk.Label(dialog, text="TIFFs are read using their axes metadata; Z is maximum-projected and each frame is normalized independently.", wraplength=600, justify=tk.LEFT).grid(row=4, column=0, columnspan=3, sticky="w", padx=12, pady=(4, 12))
-        tk.Button(dialog, text="Create Project", command=run_import, width=16).grid(row=5, column=1, sticky="e", padx=6)
-        tk.Button(dialog, text="Cancel", command=dialog.destroy, width=12).grid(row=5, column=2, sticky="w", padx=(0, 12))
+        tk.Label(dialog, text="Time/frame axis:").grid(row=3, column=0, sticky="w", padx=12, pady=6)
+        time_axis_menu.grid(row=3, column=1, sticky="w", padx=6, pady=6)
+        tk.Label(dialog, text="Channel axis:").grid(row=4, column=0, sticky="w", padx=12, pady=6)
+        channel_axis_menu.grid(row=4, column=1, sticky="w", padx=6, pady=6)
+        channel_axis_menu.bind("<<ComboboxSelected>>", update_channel_choices)
+        tk.Label(dialog, text="Z reduction:").grid(row=5, column=0, sticky="w", padx=12, pady=6)
+        ttk.Combobox(dialog, textvariable=z_reduction_var, values=("Maximum project", "First Z slice"), state="readonly", width=30).grid(row=5, column=1, sticky="w", padx=6, pady=6)
+        tk.Checkbutton(dialog, text="Create one project per TIFF instead", variable=separate_var).grid(row=6, column=1, sticky="w", padx=6, pady=6)
+        tk.Label(dialog, text="Defaults use TIFF metadata; without metadata, the importer suggests the first non-spatial dimension as time. You can override the detected role of every non-spatial dimension. X/Y may occur in either order.", wraplength=650, justify=tk.LEFT).grid(row=7, column=0, columnspan=3, sticky="w", padx=12, pady=(4, 12))
+        tk.Button(dialog, text="Create Project", command=run_import, width=16).grid(row=8, column=1, sticky="e", padx=6)
+        tk.Button(dialog, text="Cancel", command=dialog.destroy, width=12).grid(row=8, column=2, sticky="w", padx=(0, 12))
 
     def _require_project(self):
         if not self.project_dir:

@@ -96,6 +96,62 @@ def test_import_max_projects_tzyx_tiff(tmp_path):
     assert np.array_equal(image, [[0, 85], [170, 255]])
 
 
+def test_import_can_map_a_z_dimension_to_chronological_frames(tmp_path):
+    """Users can override metadata when an archive stored frames along Z."""
+    source = tmp_path / "source"
+    source.mkdir()
+    data = np.array([[[1, 2], [3, 4]], [[10, 20], [30, 40]], [[5, 6], [7, 8]]], dtype=np.uint16)
+    _write_tiff(source / "archive_export.tif", data, "ZYX")
+
+    result = create_projects_from_tiff_folder(source, tmp_path / "project", time_axis=0)
+
+    images = tmp_path / "project" / "images"
+    assert result["frames"] == 3
+    assert sorted(path.name for path in images.glob("*.png")) == [
+        "archive_export_t001.png", "archive_export_t002.png", "archive_export_t003.png",
+    ]
+    assert np.array_equal(np.asarray(Image.open(images / "archive_export_t002.png")), [[0, 85], [170, 255]])
+
+
+def test_import_requires_mapping_of_non_singleton_dimensions(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    _write_tiff(source / "unlabelled.tif", np.ones((2, 3, 2, 2), dtype=np.uint16), "QRYX")
+
+    with pytest.raises(ValueError, match="unassigned dimension 1"):
+        create_projects_from_tiff_folder(source, tmp_path / "project")
+    assert not (tmp_path / "project").exists()
+
+    result = create_projects_from_tiff_folder(
+        source, tmp_path / "project", time_axis=0, channel_axis=1, channel_index=2,
+    )
+    assert result["frames"] == 2
+
+
+def test_import_accepts_xy_spatial_order(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    _write_tiff(source / "xy.tif", np.array([[1, 2], [3, 4]], dtype=np.uint16), "XY")
+
+    create_projects_from_tiff_folder(source, tmp_path / "project")
+
+    image = np.asarray(Image.open(tmp_path / "project" / "images" / "xy_t001.png"))
+    assert np.array_equal(image, [[0, 170], [85, 255]])
+
+
+def test_import_uses_inferred_trailing_spatial_axes_without_metadata(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    data = np.arange(8, dtype=np.uint16).reshape(2, 2, 2)
+    tifffile.imwrite(source / "unlabelled.tif", data, photometric="minisblack")
+
+    description = tiff_project_import.describe_tiff_axes(source)
+    result = create_projects_from_tiff_folder(source, tmp_path / "project")
+
+    assert description["time_axis"] == 0
+    assert result["frames"] == 2
+
+
 def test_import_separate_projects_are_each_flat(tmp_path):
     source = tmp_path / "source"
     source.mkdir()

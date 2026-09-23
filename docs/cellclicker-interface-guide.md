@@ -37,9 +37,17 @@ three digits and therefore sort chronologically. Source names are made
 filesystem-safe, and two TIFF names that would produce the same prefix are
 given distinct ones rather than overwriting each other's frames.
 
-The importer reads TIFF axes metadata. It selects the requested channel,
-maximum-projects a Z axis when one is present, and accepts resulting `T,Y,X`
-or `Y,X` intensity data. Each output frame is clipped at the 99.99th intensity
+The importer reads TIFF axes metadata and proposes a mapping for the
+**Time/frame axis** and **Channel axis**. Review or change those mappings before
+importing: every non-spatial dimension is shown with its index, metadata label,
+and size. This supports arbitrary dimension order, including `T,C,Y,X`,
+`C,T,Y,X`, and `T,C,Z,Y,X`; `X,Y` and `Y,X` spatial order are both accepted.
+Unassigned Z dimensions are maximum-projected by default, with an option to use
+the first Z slice instead. If a BioImage Archive file has labelled chronological
+frames as Z slices, choose that Z dimension as the time/frame axis; it will then
+not be projected. Files without useful metadata are also supported: the importer
+uses the trailing two dimensions as spatial and suggests the first earlier
+dimension as time, which users can override. Each output frame is clipped at the 99.99th intensity
 percentile and independently min--max normalized to 8-bit PNG. It refuses to
 guess unsupported axis layouts or overwrite an existing output folder, and
 writes nothing at the output location unless every TIFF converts successfully.
@@ -444,9 +452,9 @@ projects share exactly the same ordered phase mapping.
 
 ![Cell Tightener Training](images/cell-tightener-training.png)
 
-The default storage root is
-`D:\Scott\home\Brook\TrainingData\cell_tightener\` (override with
-`CELLCLICKER_TIGHTENER_STORAGE_ROOT`). The tool makes class-agnostic,
+By default, generated datasets, training runs, and the downloaded YOLO11n
+checkpoint are kept under the repository's ignored `Models` directory. Override
+that root with `CELLCLICKER_TIGHTENER_STORAGE_ROOT`. The tool makes class-agnostic,
 review-style crops around original boxes and labels each crop from its preferred
 review box. It chooses a stride-compatible image size from the largest crop,
 capped at 320 pixels. **Prepare And Train YOLO11n** writes a

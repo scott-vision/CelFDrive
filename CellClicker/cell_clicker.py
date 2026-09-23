@@ -19,6 +19,10 @@ from CellClicker.image_series import UnsupportedFrameNamingError, discover_image
 
 
 MINI_CLICKER_DISPLAY_SCALE = 3
+# Pillow added ``Image.Resampling`` in 9.1.  The legacy constants remain
+# available in older supported Conda environments, including the environment
+# used to run CellClicker directly on this workstation.
+PIL_RESAMPLING = getattr(Image, "Resampling", Image)
 
 # Guidance for the two image canvases. The pointer rests on a canvas constantly,
 # so these are shown as a hover hint only once per run and otherwise live in a
@@ -167,7 +171,7 @@ class ImageProcessor:
         # print(self.current_x, self.current_y, self.current_w, self.current_h)
         roi = self.normalize_image(img[self.current_y:self.current_y+self.current_h, self.current_x:self.current_x+self.current_w])
         display_roi = Image.fromarray(roi).resize(
-            (display_width, display_height), Image.Resampling.NEAREST
+            (display_width, display_height), PIL_RESAMPLING.NEAREST
         )
         self.image = ImageTk.PhotoImage(image=display_roi)
         self.canvas.delete("all")
@@ -559,7 +563,7 @@ class ImageViewer:
                 new_height = int(new_width / aspect_ratio)
 
             # Resize the image
-            resized_image = self.original_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            resized_image = self.original_image.resize((new_width, new_height), PIL_RESAMPLING.LANCZOS)
             self.photo_img = ImageTk.PhotoImage(resized_image)
 
             # Update canvas dimensions
@@ -576,7 +580,7 @@ class ImageViewer:
     def resize_image(self, width, height):
         # Avoid resizing to zero to prevent PIL errors
         if width > 1 and height > 1:
-            resized_image = self.original_image.resize((width, height), Image.Resampling.LANCZOS)
+            resized_image = self.original_image.resize((width, height), PIL_RESAMPLING.LANCZOS)
             self.photo_img = ImageTk.PhotoImage(resized_image)
             self.canvas.create_image(0, 0, image=self.photo_img, anchor=tk.NW)
 
@@ -616,7 +620,7 @@ class ImageViewer:
             new_height = max_canvas_height
 
             # Resize the image to fit within the calculated dimensions
-            self.resized_image = self.original_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            self.resized_image = self.original_image.resize((new_width, new_height), PIL_RESAMPLING.LANCZOS)
 
             # Update the canvas size dynamically
             self.canvas.config(width=new_width, height=new_height)
@@ -817,11 +821,13 @@ class ImageViewer:
     def next_image(self):
         if self.current_image < len(self.images) - 1:
             self.current_image += 1
+            self.frame_number.set(str(self.current_image))
             self.update_image()
 
     def prev_image(self):
         if self.current_image > 0:
             self.current_image -= 1
+            self.frame_number.set(str(self.current_image))
             self.update_image()
 
     def go_to_frame(self):

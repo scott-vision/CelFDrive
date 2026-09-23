@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import os
 
 import numpy as np
 from PIL import Image
@@ -183,9 +184,10 @@ def test_training_reports_epoch_and_runs_test_split(tmp_path, monkeypatch):
     calls, epochs = [], []
     class FakeResult: save_dir = tmp_path / "runs" / "run"
     class FakeTrainer: save_dir = tmp_path / "runs" / "run"
+    model_paths = []
     class FakeModel:
         trainer = FakeTrainer()
-        def __init__(self, path): self.path = path; self.callback = None
+        def __init__(self, path): self.path = path; self.callback = None; model_paths.append(path)
         def add_callback(self, _, callback): self.callback = callback
         def train(self, **kwargs):
             calls.append(("train", kwargs)); self.trainer.epoch = 0; self.trainer.epochs = 2; self.trainer.metrics = {"metrics/mAP50(B)": .5}; self.callback(self.trainer)
@@ -196,3 +198,4 @@ def test_training_reports_epoch_and_runs_test_split(tmp_path, monkeypatch):
     assert epochs[0][0] == 1
     assert calls[-1][0] == "val" and calls[-1][1]["split"] == "test"
     assert result["test_metrics"]["metrics/mAP50(B)"] == .6
+    assert model_paths[0].endswith("Models" + os.sep + "yolo11n.pt")

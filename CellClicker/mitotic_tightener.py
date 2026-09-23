@@ -11,6 +11,7 @@ import os
 import shutil
 import tempfile
 from datetime import datetime
+from pathlib import Path
 
 from PIL import Image
 
@@ -28,13 +29,14 @@ TIGHTENER_CLASS_MAPPING_METADATA_KEY = "mitotic_tightener_class_mapping"
 MODEL_METADATA_FILENAME = "mitotic_tightener_model.json"
 DEFAULT_TIGHTENER_SELECTION = "center_confidence"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TIGHTENER_STORAGE_ROOT = os.environ.get(
     "CELLCLICKER_TIGHTENER_STORAGE_ROOT",
-    r"D:\Scott\home\Brook\TrainingData\cell_tightener",
+    str(REPOSITORY_ROOT / "Models"),
 )
-DEFAULT_TIGHTENER_DATASETS_ROOT = os.path.join(DEFAULT_TIGHTENER_STORAGE_ROOT, "datasets")
-DEFAULT_TIGHTENER_RUNS_ROOT = os.path.join(DEFAULT_TIGHTENER_STORAGE_ROOT, "runs")
-DEFAULT_TIGHTENER_MODELS_ROOT = os.path.join(DEFAULT_TIGHTENER_STORAGE_ROOT, "models")
+DEFAULT_TIGHTENER_DATASETS_ROOT = os.path.join(DEFAULT_TIGHTENER_STORAGE_ROOT, "tightener_datasets")
+DEFAULT_TIGHTENER_RUNS_ROOT = os.path.join(DEFAULT_TIGHTENER_STORAGE_ROOT, "tightener_runs")
+DEFAULT_TIGHTENER_MODELS_ROOT = DEFAULT_TIGHTENER_STORAGE_ROOT
 
 
 def _ensure_ultralytics():

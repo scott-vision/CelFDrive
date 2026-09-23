@@ -51,6 +51,12 @@ def test_synthetic_fixture_matches_expected_empty_output():
 
     assert smoke_test.matches_expected([], expected)
     assert not smoke_test.matches_expected([[0, 1, 2, 3, 4, 0.5]], expected)
+    assert smoke_test.result_summary([], expected) == (
+        "Smoke test passed: 0 detection(s) matched the expected fixture output (0 expected)."
+    )
+    assert smoke_test.result_summary([[0, 1, 2, 3, 4, 0.5]], expected) == (
+        "Smoke test failed: 1 detection(s) did not match the expected fixture output (0 expected)."
+    )
 
 
 def test_bundled_model_returns_the_expected_detections_for_the_fixture():
