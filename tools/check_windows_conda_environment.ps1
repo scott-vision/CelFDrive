@@ -32,12 +32,17 @@ if ($null -eq $environmentPath) {
 }
 
 Write-Host "Environment: $environmentPath"
-& $CondaExecutable run --name $EnvironmentName python -c "import sys; print(sys.executable); import cv2, pandas, tifffile, torch; print('imports: passed'); print(f'torch: {torch.__version__}'); print(f'cuda available: {torch.cuda.is_available()}')"
+$environmentPython = Join-Path $environmentPath 'python.exe'
+if (-not (Test-Path -LiteralPath $environmentPython)) {
+    throw "Environment '$EnvironmentName' does not contain Python at '$environmentPython'."
+}
+
+& $environmentPython -c "import sys; print(sys.executable); import cv2, pandas, tifffile, torch; print('imports: passed'); print(f'torch: {torch.__version__}'); print(f'cuda available: {torch.cuda.is_available()}')"
 if ($LASTEXITCODE -ne 0) {
     throw "Core CelFDrive imports failed in '$EnvironmentName'."
 }
 
-& $CondaExecutable run --name $EnvironmentName python -m pytest -q
+& $environmentPython -m pytest -q
 if ($LASTEXITCODE -ne 0) {
     throw "The CelFDrive test suite failed in '$EnvironmentName'."
 }

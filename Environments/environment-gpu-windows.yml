@@ -20,7 +20,12 @@ dependencies:
   - pytorch-gpu<3
   - torchvision<1
   - torchaudio<3
-  - ultralytics<9
+  # Ultralytics itself is installed from PyPI after this native stack resolves.
+  # Keep all of its runtime dependencies in Conda so pip cannot replace Torch
+  # or OpenCV DLLs in the SlideBook process.
+  - psutil
+  - polars
+  - ultralytics-thop=2.0.18
   - opencv<5
   - numpy<3
   - scipy<2
