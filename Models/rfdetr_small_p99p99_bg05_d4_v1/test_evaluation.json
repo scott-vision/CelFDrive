@@ -1,0 +1,29 @@
+{
+  "checkpoint": "/mnt/Raid_partition_1/internal_tmp/brooks/dockerdir/Github/BioImageArchiveData/rfdetr/runs/rfdetr_small_p99p99_bg05_d4_v1/checkpoint_best_ema.pth",
+  "checkpoint_selection": {
+    "criterion": "maximum validation mAP@50-95 from metrics.csv",
+    "validation_epoch_completed": 7,
+    "validation_epoch_zero_based": 6,
+    "validation_mAP_50": 0.752714216709137,
+    "validation_mAP_50_95": 0.6209859848022461
+  },
+  "dataset": "/mnt/Raid_partition_1/internal_tmp/brooks/dockerdir/Github/BioImageArchiveData/rfdetr/coco_p99p99_bg05_v1",
+  "run": "rfdetr_small_p99p99_bg05_d4_v1",
+  "split": "test",
+  "test_metrics": {
+    "test/AP/anaphase": 0.8309788703918457,
+    "test/AP/earlyprometaphase": 0.6637600660324097,
+    "test/AP/metaphase": 0.705173909664154,
+    "test/AP/prometaphase": 0.5772448182106018,
+    "test/AP/prophase": 0.6076129674911499,
+    "test/AP/telophase": 0.7188720107078552,
+    "test/F1": 0.7302888631820679,
+    "test/loss": 3.7267649173736572,
+    "test/mAP_50": 0.7860223054885864,
+    "test/mAP_50_95": 0.6839404106140137,
+    "test/mAP_75": 0.7534947991371155,
+    "test/mAR": 0.9033277034759521,
+    "test/precision": 0.7222534418106079,
+    "test/recall": 0.7500389814376831
+  }
+}

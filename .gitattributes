@@ -3,6 +3,7 @@
 
 # Large binary model assets
 *.pt filter=lfs diff=lfs merge=lfs -text
+Models/rfdetr_small_p99p99_bg05_d4_v1/weights/checkpoint_best_ema.pth filter=lfs diff=lfs merge=lfs -text
 
 # Reproducibility benchmark images; source-only clones retain LFS pointers.
 benchmarks/data/cellclicker/cellcognition_h2b_P0037/images/*.png filter=lfs diff=lfs merge=lfs -text
